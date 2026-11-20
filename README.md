@@ -1,5 +1,7 @@
 # MiraFrame 弥镜
 
+> 本项目基于 GitHub 上的开源项目进行修改与能力增强，本次修改内容详见 [MODIFICATIONS.md](./MODIFICATIONS.md)。
+
 <div align="center">        
   <p><strong>一个全 TypeScript 的 AI 漫剧生成项目</strong></p>        
   <p>从故事想法出发，用 LangGraph.js 编排多 Agent，生成故事大纲、角色设定、分镜脚本、角色图与镜头素材。</p>
