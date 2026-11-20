@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { MemorySaver } from "@langchain/langgraph";
 import { buildPhase2Graph } from "../graph.js";
+import { routeAfterCritique } from "../nodes/index.js";
 import { Phase2State } from "../state.js";
 
 describe("Phase2 Graph", () => {
@@ -50,32 +51,44 @@ describe("Phase2 Graph", () => {
     }
   });
 
-  it("has exactly 17 nodes in the graph", () => {
+  it("has the expected nodes: 5 production + 4 approval + 1 review", () => {
     const graph = buildPhase2Graph();
-    // The graph should have 17 nodes: 8 production + 6 approval + 2 critique + 1 review
-    const expectedNodes = [
-      "plan_outline",
-      "plan_characters",
-      "plan_shots",
-      "render_shot_images",
-      "render_shots",
-      "compose_videos",
-      "compose_videos",
-      "compose_videos",
-      "outline_approval",
-      "characters_approval",
-      "shots_approval",
-      "character_images_approval",
-      "shot_images_approval",
-      "compose_approval",
-      "render_shot_images",
-      "render_shot_images",
-      "review",
-    ];
-    expect(expectedNodes).toHaveLength(17);
-
-    // Verify we can compile
     const compiled = graph.compile({ checkpointer: new MemorySaver() });
-    expect(compiled).toBeDefined();
+
+    const nodeNames = Object.keys(compiled.getGraph().nodes);
+
+    // Production nodes
+    expect(nodeNames).toContain("plan_outline");
+    expect(nodeNames).toContain("plan_characters");
+    expect(nodeNames).toContain("plan_shots");
+    expect(nodeNames).toContain("render_shot_images");
+    expect(nodeNames).toContain("compose_videos");
+
+    // HITL approval gates (in pipeline order)
+    expect(nodeNames).toContain("outline_approval");
+    expect(nodeNames).toContain("characters_approval");
+    expect(nodeNames).toContain("shots_approval");
+    expect(nodeNames).toContain("shot_images_approval");
+
+    // Review + internal endpoints
+    expect(nodeNames).toContain("review");
+    expect(nodeNames).toContain("__start__");
+    expect(nodeNames).toContain("__end__");
+
+    // 自动审查节点（LLM 质检，位于 plan_shots 与人工审批之间）
+    expect(nodeNames).toContain("critique_shots");
+
+    expect(nodeNames).toHaveLength(13);
+  });
+
+  it("自动审查后的路由由 critic 的结论驱动", () => {
+    // 未通过：critic 把 nextStage 写成 plan_shots → 回炉重写
+    expect(routeAfterCritique({ nextStage: "plan_shots" } as never)).toBe("plan_shots");
+    // 通过 / 达到轮次上限：放行到人工审批
+    expect(routeAfterCritique({ nextStage: "shots_approval" } as never)).toBe("shots_approval");
+    // 用户要求回退：优先走 review 分支
+    expect(routeAfterCritique({ nextStage: "shots_approval", reviewRequested: true } as never)).toBe(
+      "review",
+    );
   });
 });

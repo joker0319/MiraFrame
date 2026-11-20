@@ -192,6 +192,7 @@ type ServerShot = Shot & {
 type ServerAgentRun = AgentRun & {
   projectId?: AgentRun["project_id"];
   currentAgent?: AgentRun["current_agent"];
+  awaitingGate?: AgentRun["awaiting_gate"];
   threadId?: AgentRun["thread_id"];
   resourceType?: AgentRun["resource_type"];
   resourceId?: AgentRun["resource_id"];
@@ -263,6 +264,7 @@ function normalizeAgentRun(run: AgentRun | ServerAgentRun): AgentRun {
     ...r,
     project_id: r.project_id ?? r.projectId ?? 0,
     current_agent: r.current_agent ?? r.currentAgent ?? undefined,
+    awaiting_gate: r.awaiting_gate ?? r.awaitingGate ?? null,
     thread_id: r.thread_id ?? r.threadId ?? undefined,
     resource_type: r.resource_type ?? r.resourceType ?? undefined,
     resource_id: r.resource_id ?? r.resourceId ?? undefined,

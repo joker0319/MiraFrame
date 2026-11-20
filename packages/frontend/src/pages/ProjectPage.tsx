@@ -316,6 +316,7 @@ function CanvasArea({
   const awaitingOutline = awaitingConfirm && (awaitingAgent === "outline");
   const awaitingCharacters = awaitingConfirm && awaitingAgent === "characters";
   const awaitingShots = awaitingConfirm && awaitingAgent === "shots";
+  const awaitingFrames = awaitingConfirm && awaitingAgent === "frames";
   const needsOutlineApproval = hasOutline && !outlineApproved;
   const canContinuePlanning = hasOutline && outlineApproved && characters.length === 0 && !isGenerating;
   const activeNodeId = nodeIdForStage(currentStage);
@@ -336,13 +337,15 @@ function CanvasArea({
         ? characters.slice(0, 3).map((c) => c.name).join("、") + (hasCharacterImages ? "（含角色图）" : `（角色图 ${characterImageCount}/${characters.length}）`)
         : "抽取人物并生成角色形象",
       icon: Users,
-      status: hasCharacterImages
-        ? (awaitingCharacters ? "review" : "done")
-        : hasPartialCharacters && !isGenerating
-          ? "error"
-          : characters.length > 0 || currentStage === "characters" || currentStage === "characters_approval"
-            ? hasMaterialFailure && !isGenerating ? "error" : "active"
-          : hasOutline && outlineApproved && isGenerating ? "active" : "pending",
+      status: awaitingCharacters
+        ? "review"
+        : hasCharacterImages
+          ? "done"
+          : hasPartialCharacters && !isGenerating
+            ? "error"
+            : characters.length > 0 || currentStage === "characters" || currentStage === "characters_approval"
+              ? hasMaterialFailure && !isGenerating ? "error" : "active"
+              : hasOutline && outlineApproved && isGenerating ? "active" : "pending",
       metric: characters.length ? `${characterImageCount}/${characters.length} 图` : "待生成",
     },
     {
@@ -358,13 +361,15 @@ function CanvasArea({
       label: "镜头画面",
       description: hasShotVideos ? "镜头视频片段已生成" : hasShotImages ? "分镜帧已生成，继续生成视频" : "由分镜生成镜头视频",
       icon: Image,
-      status: hasShotVideos
-        ? "done"
-        : shots.length > 0 && (hasMaterialFailure || taskVideoCount > 0) && !isGenerating
-          ? "error"
-          : currentStage === "shot_images" && isGenerating || playableVideoCount > 0 || shotImageCount > 0
-            ? "active"
-            : "pending",
+      status: awaitingFrames
+        ? "review"
+        : hasShotVideos
+          ? "done"
+          : shots.length > 0 && (hasMaterialFailure || taskVideoCount > 0) && !isGenerating
+            ? "error"
+            : currentStage === "shot_images" && isGenerating || playableVideoCount > 0 || shotImageCount > 0
+              ? "active"
+              : "pending",
       metric: `${playableVideoCount}/${shots.length || 0} 视频`,
     },
     {
@@ -372,7 +377,7 @@ function CanvasArea({
       label: "合成输出",
       description: isFinalVideoUrl(projectVideoUrl) ? "最终视频已输出" : projectVideoUrl ? "镜头连续播放预览已生成" : hasShotVideos ? "视频片段准备输出" : "合成最终漫剧视频",
       icon: Download,
-      status: projectVideoUrl && !isInternalCompositionUrl(projectVideoUrl) ? "done" : currentStage === "output" && isGenerating ? "active" : hasShotVideos ? "active" : "pending",
+      status: projectVideoUrl && !isInternalCompositionUrl(projectVideoUrl) ? "done" : currentStage === "output" && isGenerating ? "active" : awaitingFrames ? "pending" : hasShotVideos ? "active" : "pending",
       metric: isFinalVideoUrl(projectVideoUrl) ? "成片" : projectVideoUrl ? "预览" : `${playableVideoCount} 段`,
     },
   ];

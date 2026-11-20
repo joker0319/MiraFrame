@@ -146,6 +146,9 @@ export const agentRuns = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     status: varchar("status", { length: 50 }).notNull().default("queued"),
     currentAgent: varchar("current_agent"),
+    // The approval gate the run is currently waiting on (human-in-the-loop).
+    // Persisted so the frontend can restore the confirm button after a refresh.
+    awaitingGate: varchar("awaiting_gate"),
     progress: real("progress").notNull().default(0.0),
     routeDecision: text("route_decision"),
     patchPlan: text("patch_plan"),

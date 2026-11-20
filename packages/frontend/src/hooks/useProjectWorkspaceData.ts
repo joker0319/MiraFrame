@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { projectsApi } from "@/services/projectsApi";
+import { agentForGate } from "@/utils/workflowStage";
 import { useCharacterStore } from "@/stores/characterStore";
 import { useMessageStore } from "@/stores/messageStore";
 import { useProjectStore } from "@/stores/projectStore";
@@ -78,11 +79,24 @@ export function useProjectWorkspaceData(projectId: number | null, isGenerating: 
   }, [latestRunQuery.data?.status, messagesQuery.data, setMessages]);
 
   useEffect(() => {
-    const status = latestRunQuery.data?.status;
-    if (!status || status === "running" || status === "queued") return;
-    setGenerating(false);
-    setAwaitingConfirm(false);
-  }, [latestRunQuery.data?.status, setAwaitingConfirm, setGenerating]);
+    const run = latestRunQuery.data;
+    if (!run) return;
+    const status = run.status;
+
+    // Terminal states — clear any lingering run state
+    if (status !== "running" && status !== "queued") {
+      setGenerating(false);
+      setAwaitingConfirm(false);
+      return;
+    }
+
+    // Active run — restore run state from DB so a page refresh keeps the
+    // confirm button visible while the worker waits at an approval gate.
+    setGenerating(true);
+    if (run.awaiting_gate) {
+      setAwaitingConfirm(true, agentForGate(run.awaiting_gate), run.id);
+    }
+  }, [latestRunQuery.data, setAwaitingConfirm, setGenerating]);
 
   return {
     projectQuery,

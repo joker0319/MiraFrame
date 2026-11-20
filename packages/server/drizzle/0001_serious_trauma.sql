@@ -1,0 +1,1 @@
+ALTER TABLE "agentrun" ADD COLUMN "awaiting_gate" varchar;

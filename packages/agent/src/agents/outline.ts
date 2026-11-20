@@ -1,6 +1,7 @@
 import { BaseAgent, type AgentContext } from "./base.js";
 import type { Phase2StateType } from "../state.js";
 import { OUTLINE_FEEDBACK_PROMPT, OUTLINE_SYSTEM_PROMPT } from "../prompts/outline.js";
+import { createOutlineToolKit, runToolLoop } from "../tools/index.js";
 
 export class OutlineAgent extends BaseAgent {
   constructor() {
@@ -8,6 +9,7 @@ export class OutlineAgent extends BaseAgent {
   }
 
   async run(ctx: AgentContext, state: Phase2StateType): Promise<Partial<Phase2StateType>> {
+    console.log(">>> [OutlineAgent] 被调用了, state =", JSON.stringify(state, null, 2));
     await this.sendMessage(ctx, "开始生成故事大纲...", { progress: 0.05, isLoading: true, stage: "plan_outline" });
     await this.sendThinking(ctx, "planning", "分析故事要素：主题、世界观、情感弧线...");
 
@@ -17,23 +19,43 @@ export class OutlineAgent extends BaseAgent {
         .replace("{feedback}", state.feedback)
       : "请根据提供的故事创想生成一份详细的故事大纲。必须全部使用中文输出。";
 
-    const outline = await this.callLlm(ctx, OUTLINE_SYSTEM_PROMPT, userPrompt, { maxTokens: 4096 });
+    const toolkit = createOutlineToolKit(ctx);
+    const loop = await runToolLoop({
+      ctx,
+      registry: toolkit.registry,
+      system: OUTLINE_SYSTEM_PROMPT,
+      user: userPrompt,
+      intent: "outline",
+      maxRounds: 6,
+      onCall: async (call, result) => {
+        await this.sendThinking(
+          ctx,
+          "decision",
+          `模型决定调用工具 ${call.name}`,
+          result.substring(0, 300),
+        );
+      },
+    });
 
-    // Parse outline from LLM response
-    let storyOutline: Record<string, unknown> = {};
-    try {
-      storyOutline = JSON.parse(extractJson(outline)) as Record<string, unknown>;
-    } catch {
-      storyOutline = { raw: outline };
+    // 模型通过工具落库；若它没遵守协议直接返回了大纲 JSON，保留旧的兜底解析路径
+    let storyOutline = toolkit.getSavedOutline();
+    let visualBible = toolkit.getVisualBible();
+    if (!storyOutline) {
+      console.warn("[OutlineAgent] 模型未完成 save_outline，使用文本结果兜底");
+      try {
+        storyOutline = JSON.parse(extractJson(loop.finalText)) as Record<string, unknown>;
+      } catch {
+        storyOutline = { raw: loop.finalText };
+      }
+      visualBible =
+        typeof storyOutline.visual_bible === "string"
+          ? storyOutline.visual_bible
+          : typeof storyOutline.visualBible === "string"
+            ? storyOutline.visualBible
+            : null;
+      await ctx.saveOutline(storyOutline, visualBible);
     }
-    const visualBible =
-      typeof storyOutline.visual_bible === "string"
-        ? storyOutline.visual_bible
-        : typeof storyOutline.visualBible === "string"
-          ? storyOutline.visualBible
-          : null;
 
-    await ctx.saveOutline(storyOutline, visualBible);
     await this.sendMessage(ctx, formatOutlineMessage(storyOutline, visualBible), {
       progress: 0.2,
       summary: "大纲生成完成",

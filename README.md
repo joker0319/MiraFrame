@@ -1,17 +1,17 @@
 # MiraFrame 弥镜
 
-<div align="center">
-  <p><strong>一个全 TypeScript 的 AI 漫剧生成项目</strong></p>
+<div align="center">        
+  <p><strong>一个全 TypeScript 的 AI 漫剧生成项目</strong></p>        
   <p>从故事想法出发，用 LangGraph.js 编排多 Agent，生成故事大纲、角色设定、分镜脚本、角色图与镜头素材。</p>
 
-  <p>
-    <img src="https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
-    <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=111827" alt="React" />
-    <img src="https://img.shields.io/badge/Nest.js-11-E0234E?style=flat-square&logo=nestjs&logoColor=white" alt="NestJS" />
-    <img src="https://img.shields.io/badge/LangGraph.js-v1.x-6D28D9?style=flat-square" alt="LangGraph.js" />
-    <img src="https://img.shields.io/badge/pnpm-monorepo-F69220?style=flat-square&logo=pnpm&logoColor=white" alt="pnpm" />
-    <img src="https://img.shields.io/badge/Drizzle-ORM-C5F74E?style=flat-square&logo=drizzle&logoColor=111827" alt="Drizzle ORM" />
-  </p>
+  <p>        
+    <img src="https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square\\\\\\\\\\\\\\\&logo=typescript\\\\\\\\\\\\\\\&logoColor=white" alt="TypeScript" />        
+    <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square\\\\\\\\\\\\\\\&logo=react\\\\\\\\\\\\\\\&logoColor=111827" alt="React" />        
+    <img src="https://img.shields.io/badge/Nest.js-11-E0234E?style=flat-square\\\\\\\\\\\\\\\&logo=nestjs\\\\\\\\\\\\\\\&logoColor=white" alt="NestJS" />        
+    <img src="https://img.shields.io/badge/LangGraph.js-v1.x-6D28D9?style=flat-square" alt="LangGraph.js" />        
+    <img src="https://img.shields.io/badge/pnpm-monorepo-F69220?style=flat-square\\\\\\\\\\\\\\\&logo=pnpm\\\\\\\\\\\\\\\&logoColor=white" alt="pnpm" />        
+    <img src="https://img.shields.io/badge/Drizzle-ORM-C5F74E?style=flat-square\\\\\\\\\\\\\\\&logo=drizzle\\\\\\\\\\\\\\\&logoColor=111827" alt="Drizzle ORM" />        
+  </p>        
 </div>
 
 MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简单调用一次大模型，而是把“故事大纲 → 角色设定 → 分镜脚本 → 角色图 → 镜头素材 → 导出”拆成可观察、可重试、可人工反馈的创作流水线。
@@ -24,7 +24,7 @@ MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简�
 - Agent 层使用 LangGraph.js，可以学习状态图、节点编排、人工反馈、重试和工作流恢复。
 - 项目不是纯 Demo，有项目页、节点详情、设置面板、生成服务配置、失败重试等真实产品逻辑。
 
-> [!NOTE]
+> [!NOTE]  
 > MiraFrame 目前定位为学习、演示和产品原型项目。它适合研究 AI Agent 工程化链路，不建议不经改造直接用于生产环境。
 
 ---
@@ -49,16 +49,16 @@ MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简�
 
 如果你是前端出身，这个项目可以作为进入 AI Agent 工程的第一条完整路径：
 
-| 学习方向 | 项目里的对应实现 |
-|---|---|
-| AI 产品流程 | 把漫剧创作拆成故事、角色、分镜、图片、视频、导出等阶段 |
-| Agent 编排 | 使用 LangGraph.js 构建多节点状态图 |
-| Human-in-the-Loop | 在故事大纲、角色设定、分镜脚本阶段支持用户反馈修改 |
-| 前后端类型共享 | `@miraframe/shared` 提供 Zod Schema 和 TypeScript 类型 |
-| 实时进度同步 | 后端 WebSocket 推送节点状态、日志和生成结果 |
-| 失败处理 | 图片、视频、LLM 调用失败后进入失败态并支持重试 |
-| 生成服务配置 | 文本、图像、视频服务可在设置面板中配置和测试 |
-| 全栈工程结构 | pnpm workspace 管理 frontend / server / agent / shared |
+| 学习方向              | 项目里的对应实现                                             |
+| ----------------- | ---------------------------------------------------- |
+| AI 产品流程           | 把漫剧创作拆成故事、角色、分镜、图片、视频、导出等阶段                          |
+| Agent 编排          | 使用 LangGraph.js 构建多节点状态图                             |
+| Human-in-the-Loop | 在故事大纲、角色设定、分镜脚本阶段支持用户反馈修改                            |
+| 前后端类型共享           | `@miraframe/shared` 提供 Zod Schema 和 TypeScript 类型    |
+| 实时进度同步            | 后端 WebSocket 推送节点状态、日志和生成结果                          |
+| 失败处理              | 图片、视频、LLM 调用失败后进入失败态并支持重试                            |
+| 生成服务配置            | 文本、图像、视频服务可在设置面板中配置和测试                               |
+| 全栈工程结构            | pnpm workspace 管理 frontend / server / agent / shared |
 
 ---
 
@@ -139,21 +139,21 @@ MiraFrame 的生成流程不是一次性请求，而是一个可恢复的多阶�
 
 ## 技术栈
 
-| 层级 | 技术 |
-|---|---|
-| 语言 | TypeScript 5.5+ |
-| 包管理 | pnpm 9 workspace |
-| 前端 | React 18, Vite 6, React Router 7 |
-| 前端状态 | Zustand 5, TanStack Query 5 |
-| UI | TailwindCSS 4, Radix UI, lucide-react |
-| 后端 | Nest.js 11 |
-| Agent 编排 | LangGraph.js v1.x |
-| 数据库 | PostgreSQL 16 |
-| ORM | Drizzle ORM, drizzle-zod |
-| 队列 / 缓存 | Redis 7, BullMQ |
-| 实时通信 | Socket.IO |
-| 测试 | Vitest, Testing Library, Playwright |
-| 部署 | Docker Compose |
+| 层级       | 技术                                    |
+| -------- | ------------------------------------- |
+| 语言       | TypeScript 5.5+                       |
+| 包管理      | pnpm 9 workspace                      |
+| 前端       | React 18, Vite 6, React Router 7      |
+| 前端状态     | Zustand 5, TanStack Query 5           |
+| UI       | TailwindCSS 4, Radix UI, lucide-react |
+| 后端       | Nest.js 11                            |
+| Agent 编排 | LangGraph.js v1.x                     |
+| 数据库      | PostgreSQL 16                         |
+| ORM      | Drizzle ORM, drizzle-zod              |
+| 队列 / 缓存  | Redis 7, BullMQ                       |
+| 实时通信     | Socket.IO                             |
+| 测试       | Vitest, Testing Library, Playwright   |
+| 部署       | Docker Compose                        |
 
 ---
 
@@ -241,8 +241,8 @@ pnpm --dir packages/frontend dev
 
 常用访问地址：
 
-- 前端: http://localhost:5173
-- 后端 API: http://localhost:3000
+- 前端: <http://localhost:5173>
+- 后端 API: <http://localhost:3000>
 
 ---
 
@@ -334,16 +334,16 @@ LangGraph.js 工作流层，负责把创作流程拆成多个节点并维护状�
 
 完整配置见 [`.env.example`](./.env.example)。
 
-| 分类 | 关键变量 |
-|---|---|
-| 基础 | `NODE_ENV`, `PORT`, `CORS_ORIGINS`, `PUBLIC_BASE_URL` |
-| 数据库 | `DATABASE_URL` |
-| Redis | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT` |
-| 文本生成 | `TEXT_PROVIDER`, `TEXT_BASE_URL`, `TEXT_API_KEY`, `TEXT_MODEL`, `TEXT_ENDPOINT` |
-| 图像生成 | `IMAGE_PROVIDER`, `IMAGE_BASE_URL`, `IMAGE_API_KEY`, `IMAGE_MODEL`, `IMAGE_ENDPOINT` |
-| 视频生成 | `VIDEO_PROVIDER`, `VIDEO_BASE_URL`, `VIDEO_API_KEY`, `VIDEO_MODEL`, `VIDEO_ENDPOINT` |
-| 语音 / 音乐 | `TTS_ENABLED`, `TTS_DEFAULT_VOICE`, `BGM_ENABLED`, `BGM_VOLUME` |
-| 工作流 | `CRITIQUE_ENABLED`, `CRITIQUE_SCORE_THRESHOLD`, `CRITIQUE_MAX_ROUNDS` |
+| 分类      | 关键变量                                                                                 |
+| ------- | ------------------------------------------------------------------------------------ |
+| 基础      | `NODE_ENV`, `PORT`, `CORS_ORIGINS`, `PUBLIC_BASE_URL`                                |
+| 数据库     | `DATABASE_URL`                                                                       |
+| Redis   | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT`                                              |
+| 文本生成    | `TEXT_PROVIDER`, `TEXT_BASE_URL`, `TEXT_API_KEY`, `TEXT_MODEL`, `TEXT_ENDPOINT`      |
+| 图像生成    | `IMAGE_PROVIDER`, `IMAGE_BASE_URL`, `IMAGE_API_KEY`, `IMAGE_MODEL`, `IMAGE_ENDPOINT` |
+| 视频生成    | `VIDEO_PROVIDER`, `VIDEO_BASE_URL`, `VIDEO_API_KEY`, `VIDEO_MODEL`, `VIDEO_ENDPOINT` |
+| 语音 / 音乐 | `TTS_ENABLED`, `TTS_DEFAULT_VOICE`, `BGM_ENABLED`, `BGM_VOLUME`                      |
+| 工作流     | `CRITIQUE_ENABLED`, `CRITIQUE_SCORE_THRESHOLD`, `CRITIQUE_MAX_ROUNDS`                |
 
 ---
 

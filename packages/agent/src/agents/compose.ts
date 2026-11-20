@@ -9,6 +9,6 @@ export class ComposeAgent extends BaseAgent {
   async runVideos(ctx: AgentContext, _state: Phase2StateType): Promise<Partial<Phase2StateType>> {
     await this.sendMessage(ctx, "开始生成视频片段...", { progress: 0.85, isLoading: true, stage: "compose_videos" });
     await ctx.composeProjectVideo();
-    return { currentStage: "compose_videos", nextStage: "compose_approval", stageHistory: ["compose_videos"] };
+    return { currentStage: "compose_videos", nextStage: null, stageHistory: ["compose_videos"] };
   }
 }

@@ -1,7 +1,14 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { DRIZZLE, type Db } from "../db";
 import { schema } from "../db";
+import { analyzeCharacterImpact } from "./lineage";
+
+export interface AssetImpact {
+  changedCharacters: number;
+  affectedShots: number;
+  reusedShots: number;
+}
 
 export interface RevisionInput {
   projectId: number;
@@ -27,34 +34,65 @@ export class RevisionService {
     return "review";
   }
 
-  async prepareAssets(input: RevisionInput): Promise<void> {
-    if ((input.entityType === "character" || input.entityType === "characters") && input.feedbackType === "regenerate_image") {
-      if (input.entityId) {
+  /**
+   * 修改提交前先做影响面分析：只标脏真正受影响的产物，其余让渲染节点复用。
+   *
+   * 血缘来自 shots.characterIds（持久化字段），不来自 LangGraph state——
+   * state 按 run 隔离，上一次 run 的血缘在新 run 里读不到。
+   */
+  async prepareAssets(input: RevisionInput): Promise<AssetImpact> {
+    const shots = await this.db
+      .select({
+        id: schema.shots.id,
+        characterIds: schema.shots.characterIds,
+        prompt: schema.shots.prompt,
+        imagePrompt: schema.shots.imagePrompt,
+        imageUrl: schema.shots.imageUrl,
+        videoUrl: schema.shots.videoUrl,
+      })
+      .from(schema.shots)
+      .where(eq(schema.shots.projectId, input.projectId));
+    const impact: AssetImpact = { changedCharacters: 0, affectedShots: 0, reusedShots: shots.length };
+
+    const isCharacter = input.entityType === "character" || input.entityType === "characters";
+    if (isCharacter) {
+      const characters = await this.db
+        .select({ id: schema.characters.id })
+        .from(schema.characters)
+        .where(eq(schema.characters.projectId, input.projectId));
+      const changedIds = input.entityId ? [input.entityId] : characters.map((character) => character.id);
+      impact.changedCharacters = changedIds.length;
+
+      // 角色描述/形象变了，角色图本身也要重画（前端会重新生成）
+      if (changedIds.length > 0 && input.feedbackType !== "rename") {
         await this.db
           .update(schema.characters)
           .set({ imageUrl: null, referenceImages: [], updatedAt: new Date() })
-          .where(eq(schema.characters.id, input.entityId));
-      } else {
-        await this.db
-          .update(schema.characters)
-          .set({ imageUrl: null, referenceImages: [], updatedAt: new Date() })
-          .where(eq(schema.characters.projectId, input.projectId));
+          .where(inArray(schema.characters.id, changedIds));
       }
-      return;
+
+      // 只把引用了这些角色的镜头标脏，其余镜头的 imageUrl/videoUrl 保留 → 渲染时跳过
+      const analysis = analyzeCharacterImpact(shots, changedIds);
+      impact.affectedShots = analysis.affected.length;
+      impact.reusedShots = analysis.reused.length;
+      if (analysis.affected.length > 0) {
+        await this.db
+          .update(schema.shots)
+          .set({ imageUrl: null, videoUrl: null, updatedAt: new Date() })
+          .where(inArray(schema.shots.id, analysis.affected));
+      }
+      return impact;
     }
 
-    if (input.entityType !== "shot") return;
+    if (input.entityType !== "shot") return impact;
 
     if (!input.entityId) {
-      const projectShots = await this.db
-        .select({ id: schema.shots.id, prompt: schema.shots.prompt, imagePrompt: schema.shots.imagePrompt })
-        .from(schema.shots)
-        .where(eq(schema.shots.projectId, input.projectId));
-
-      for (const shot of projectShots) {
+      for (const shot of shots) {
         await this.prepareShotAsset(input, shot.id, shot.prompt, shot.imagePrompt);
       }
-      return;
+      impact.affectedShots = shots.length;
+      impact.reusedShots = 0;
+      return impact;
     }
 
     const [shot] = await this.db
@@ -62,8 +100,10 @@ export class RevisionService {
       .from(schema.shots)
       .where(eq(schema.shots.id, input.entityId))
       .limit(1);
-
     await this.prepareShotAsset(input, input.entityId, shot?.prompt, shot?.imagePrompt);
+    impact.affectedShots = shots.some((item) => item.id === input.entityId) ? 1 : 0;
+    impact.reusedShots = shots.length - impact.affectedShots;
+    return impact;
   }
 
   formatUserMessage(input: RevisionInput): string {
@@ -73,11 +113,13 @@ export class RevisionService {
     return target ? `[修改反馈：${target}]\n${input.content}` : input.content;
   }
 
-  formatAcceptedMessage(input: RevisionInput, targetStage: string): string {
+  formatAcceptedMessage(input: RevisionInput, targetStage: string, impact?: AssetImpact): string {
     const target = input.entityType === "shot" && input.entityId
       ? `镜头 #${input.entityId}`
       : this.entityLabel(input.entityType);
-    return `已提交修改：${target}\n将重新执行节点：${targetStage}\n反馈内容：${input.content}`;
+    const base = `已提交修改：${target}\n将重新执行节点：${targetStage}\n反馈内容：${input.content}`;
+    if (!impact || impact.affectedShots === 0) return base;
+    return `${base}\n增量范围：${impact.affectedShots} 个镜头重新渲染，${impact.reusedShots} 个镜头复用已有画面。`;
   }
 
   private async prepareShotAsset(

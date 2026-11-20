@@ -13,12 +13,28 @@ export function resolveEventStage(data: Record<string, unknown>): WorkflowStage 
     plan_shots: "shots",
     shots_approval: "shots_approval",
     render_shot_images: "shot_images",
+    shot_images_approval: "shot_images",
     compose_videos: "output",
-    compose_approval: "output",
     review: "review",
   };
 
   return stageMap[stage] || null;
+}
+
+/** Map an approval gate to the awaitingAgent value used by run state / node cards. */
+export function agentForGate(gate: string): string {
+  switch (gate) {
+    case "outline_approval":
+      return "outline";
+    case "characters_approval":
+      return "characters";
+    case "shots_approval":
+      return "shots";
+    case "shot_images_approval":
+      return "frames";
+    default:
+      return "system";
+  }
 }
 
 export interface StageInfo {

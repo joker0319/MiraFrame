@@ -7,11 +7,13 @@ import { DRIZZLE, type Db } from "../db";
 import { WsGateway } from "../ws";
 import { ImageService, TextService, VideoService } from "../services";
 import { buildPhase2Graph, setNodeContext, clearNodeContext, runWithNodeContext } from "@miraframe/agent";
+import type { LlmChatMessage, ToolDefinition } from "@miraframe/agent";
 import { MemorySaver, Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { and, asc, eq } from "drizzle-orm";
 import { schema } from "../db";
 import type { GenerationInput } from "./agent.service";
-import { buildInitialState, buildProjectContext } from "./agent-run-state";
+import { buildInitialState, buildProjectContext, buildConversationHistory } from "./agent-run-state";
+import { buildArtifactLineage, matchCharacterIds, type LineageCharacter } from "./lineage";
 
 @Processor("generation", { concurrency: 8 })
 @Injectable()
@@ -63,6 +65,44 @@ export class AgentProcessor extends WorkerHost {
       .where(eq(schema.projects.id, projectId));
 
     const projectContext = buildProjectContext(projectId, project, job.data);
+
+    // ---- 历史对话上下文 ----
+    // messages 表此前只写不读，导致用户的第二轮反馈（"改回第一版但保留结尾"）
+    // 对模型来说是一句没有指代对象的话。这里读回最近消息并配对成轮次。
+    const historyRows = await this.db
+      .select({
+        agent: schema.messages.agent,
+        role: schema.messages.role,
+        content: schema.messages.content,
+        summary: schema.messages.summary,
+        createdAt: schema.messages.createdAt,
+      })
+      .from(schema.messages)
+      .where(eq(schema.messages.projectId, projectId))
+      .orderBy(asc(schema.messages.createdAt), asc(schema.messages.id))
+      .limit(60);
+    const conversationHistory = buildConversationHistory(historyRows, {
+      excludeLatestUser: Boolean(job.data.feedback),
+    });
+    const contextBlock = conversationHistory ? `${projectContext}\n\n${conversationHistory}` : projectContext;
+    if (conversationHistory) {
+      console.log(`[processor] 注入历史对话 ${conversationHistory.length} chars`);
+    }
+
+    // 角色是在 plan_characters 节点里才创建的，run 开头查一定为空 → 惰性加载，
+    // 首次调用发生在 plan_shots，此时角色已经落库。
+    let characterCache: LineageCharacter[] | null = null;
+    const currentCharacters = async (): Promise<LineageCharacter[]> => {
+      if (!characterCache) {
+        characterCache = await this.db
+          .select({ id: schema.characters.id, name: schema.characters.name })
+          .from(schema.characters)
+          .where(eq(schema.characters.projectId, projectId))
+          .orderBy(asc(schema.characters.id));
+      }
+      return characterCache;
+    };
+
     let latestOutline: Record<string, unknown> | null = project?.storyOutline || null;
     let latestVisualBible: string | null = project?.visualBible || null;
 
@@ -134,7 +174,7 @@ export class AgentProcessor extends WorkerHost {
         console.log(`[processor:llm] systemPrompt (first 120 chars): ${systemPrompt.substring(0, 120)}`);
         console.log(`[processor:llm] userPrompt (first 120 chars): ${userPrompt.substring(0, 120)}`);
         try {
-          const promptWithProject = `${projectContext}\n\nTask:\n${userPrompt}`;
+          const promptWithProject = `${contextBlock}\n\nTask:\n${userPrompt}`;
           const result = await this.textService.generate(promptWithProject, {
             ...opts,
             systemPrompt,
@@ -145,6 +185,36 @@ export class AgentProcessor extends WorkerHost {
           console.error(`[processor:llm] FAILED:`, err);
           throw err;
         }
+      },
+
+      /**
+       * 工具通道：模型在这里真正"决定调用哪个工具"。
+       * 项目上下文只注入一次到首条 user 消息，避免多轮循环里重复拼接。
+       */
+      callLlmWithTools: async (
+        messages: LlmChatMessage[],
+        tools: ToolDefinition[],
+        opts?: { maxTokens?: number; intent?: string },
+      ) => {
+        console.log(`[processor:llm:tools] tools=${tools.map((t) => t.name).join(",")} messages=${messages.length}`);
+        let injected = false;
+        const withContext = messages.map((message) => {
+          if (!injected && message.role === "user") {
+            injected = true;
+            return { ...message, content: `${contextBlock}\n\nTask:\n${message.content}` };
+          }
+          return message;
+        });
+        return this.textService.generateWithTools(withContext, tools, opts);
+      },
+
+      /** 从数据库读取持久化血缘，跨 run 有效（LangGraph state 做不到） */
+      getArtifactLineage: async () => {
+        const rows = await this.db
+          .select({ id: schema.shots.id, characterIds: schema.shots.characterIds })
+          .from(schema.shots)
+          .where(eq(schema.shots.projectId, projectId));
+        return buildArtifactLineage(rows);
       },
 
       saveOutline: async (outline: Record<string, unknown>, visualBible?: string | null) => {
@@ -298,6 +368,12 @@ export class AgentProcessor extends WorkerHost {
 	        console.log(`[processor:db] Creating shot: order=${shot.order}`);
 	        const imagePrompt = shot.imagePrompt || buildShotImagePrompt(shot, latestVisualBible, project?.style);
 	        const videoPrompt = shot.prompt || buildShotVideoPrompt(shot, imagePrompt);
+	        const characterIds = matchCharacterIds(
+	          [shot.description, shot.scene, shot.action, shot.dialogue, shot.prompt, shot.imagePrompt]
+	            .filter(Boolean)
+	            .join(" "),
+	          await currentCharacters(),
+	        );
 	        const [existing] = await this.db
 	          .select()
 	          .from(schema.shots)
@@ -318,6 +394,7 @@ export class AgentProcessor extends WorkerHost {
 	              lighting: shot.lighting || null,
 	              motionNote: shot.motionNote || null,
 	              duration: shot.duration || existing.duration || 5,
+	              characterIds: characterIds.length ? characterIds : existing.characterIds,
 	              updatedAt: new Date(),
 	            })
 	            .where(eq(schema.shots.id, existing.id))
@@ -345,6 +422,7 @@ export class AgentProcessor extends WorkerHost {
 	            lighting: shot.lighting || null,
 	            motionNote: shot.motionNote || null,
 	            duration: shot.duration || 5,
+	            characterIds,
 	            createdAt: new Date(),
 	            updatedAt: new Date(),
 	          })
@@ -516,13 +594,19 @@ export class AgentProcessor extends WorkerHost {
 
             console.log(`[processor] ⏸ Interrupted at gate="${gate}" question="${question}"`);
 
+            // Persist the gate so the frontend can restore the confirm UI after a refresh
+            await this.db
+              .update(schema.agentRuns)
+              .set({ awaitingGate: gate, updatedAt: new Date() })
+              .where(eq(schema.agentRuns.id, runId));
+
             // Get the current stage from state for the WS event
             const currentStageValue = (result as Record<string, unknown>).currentStage || "plan_outline";
 
             this.wsGateway.sendToProject(projectId, "run_awaiting_confirm", {
               run_id: runId,
               project_id: projectId,
-              agent: gate === "outline_approval" ? "outline" : "system",
+              agent: agentForGate(gate),
               gate,
               current_stage: currentStageValue,
               question,
@@ -566,12 +650,16 @@ export class AgentProcessor extends WorkerHost {
                 run_id: runId,
                 project_id: projectId,
               });
+              await this.db
+                .update(schema.agentRuns)
+                .set({ awaitingGate: null, updatedAt: new Date() })
+                .where(eq(schema.agentRuns.id, runId));
               graphInput = new Command({ resume: true });
             } else {
               console.log(`[processor] ✗ Cancelled by user or timeout`);
               await this.db
                 .update(schema.agentRuns)
-                .set({ status: "cancelled", updatedAt: new Date() })
+                .set({ status: "cancelled", awaitingGate: null, updatedAt: new Date() })
                 .where(eq(schema.agentRuns.id, runId));
               this.wsGateway.sendToProject(projectId, "run_cancelled", {
                 run_id: runId,
@@ -586,13 +674,13 @@ export class AgentProcessor extends WorkerHost {
 
             await this.db
               .update(schema.agentRuns)
-              .set({ status: "succeeded", progress: 1.0, updatedAt: new Date() })
+              .set({ status: "succeeded", progress: 1.0, awaitingGate: null, updatedAt: new Date() })
               .where(eq(schema.agentRuns.id, runId));
 
             this.wsGateway.sendToProject(projectId, "run_completed", {
               run_id: runId,
               project_id: projectId,
-              message: "Generation completed",
+              message: "全部完成：最终视频已合成",
             });
           }
         } catch (error: unknown) {
@@ -604,7 +692,7 @@ export class AgentProcessor extends WorkerHost {
 
           await this.db
             .update(schema.agentRuns)
-            .set({ status: "failed", error: errorMessage, updatedAt: new Date() })
+            .set({ status: "failed", error: errorMessage, awaitingGate: null, updatedAt: new Date() })
             .where(eq(schema.agentRuns.id, runId));
 
           this.wsGateway.sendToProject(projectId, "run_failed", {
@@ -672,6 +760,22 @@ export class AgentProcessor extends WorkerHost {
 
       this.redisSub.on("message", onMessage);
     });
+  }
+}
+
+/** Map an approval gate to the frontend's awaitingAgent value. */
+function agentForGate(gate: string): string {
+  switch (gate) {
+    case "outline_approval":
+      return "outline";
+    case "characters_approval":
+      return "characters";
+    case "shots_approval":
+      return "shots";
+    case "shot_images_approval":
+      return "frames";
+    default:
+      return "system";
   }
 }
 

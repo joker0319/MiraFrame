@@ -79,6 +79,7 @@ export class AgentService implements OnApplicationBootstrap {
       .set({
         status: "cancelled",
         error: "Stale generation run cancelled on server startup",
+        awaitingGate: null,
         updatedAt: new Date(),
       })
       .where(inArray(schema.agentRuns.id, Array.from(staleRunIds)));
@@ -155,7 +156,7 @@ export class AgentService implements OnApplicationBootstrap {
       createdAt: new Date(),
     });
 
-    await this.revisionService.prepareAssets(input);
+    const assetImpact = await this.revisionService.prepareAssets(input);
 
     const runId = await this.startGeneration({
       projectId: input.projectId,
@@ -172,7 +173,7 @@ export class AgentService implements OnApplicationBootstrap {
     this.wsGateway.sendToProject(input.projectId, "run_message", {
       agent: "system",
       role: "assistant",
-      content: this.revisionService.formatAcceptedMessage(input, targetStage),
+      content: this.revisionService.formatAcceptedMessage(input, targetStage, assetImpact),
       summary: "修改任务已启动",
       isLoading: false,
     });
@@ -199,7 +200,7 @@ export class AgentService implements OnApplicationBootstrap {
     // Update DB
     await this.db
       .update(schema.agentRuns)
-      .set({ status: "cancelled", updatedAt: new Date() })
+      .set({ status: "cancelled", awaitingGate: null, updatedAt: new Date() })
       .where(eq(schema.agentRuns.id, runId));
 
     this.wsGateway.sendToProject(projectId, "run_cancelled", {

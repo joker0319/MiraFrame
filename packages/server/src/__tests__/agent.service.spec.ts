@@ -41,7 +41,7 @@ describe("AgentService", () => {
           provide: RevisionService,
           useValue: {
             targetStageFor: () => "plan_outline",
-            prepareAssets: async () => {},
+            prepareAssets: async () => ({ changedCharacters: 0, affectedShots: 0, reusedShots: 0 }),
             formatUserMessage: () => "feedback",
             formatAcceptedMessage: () => "accepted",
           },

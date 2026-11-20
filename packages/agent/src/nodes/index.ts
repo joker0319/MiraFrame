@@ -5,12 +5,14 @@ import type { AgentContext } from "../agents/base.js";
 import { OutlineAgent } from "../agents/outline.js";
 import { PlanAgent } from "../agents/plan.js";
 import { ComposeAgent } from "../agents/compose.js";
+import { CriticAgent } from "../agents/critic.js";
 import { ReviewRuleEngine } from "../agents/review.js";
 
 // Factory to create agent instances
 const outlineAgent = new OutlineAgent();
 const planAgent = new PlanAgent();
 const composeAgent = new ComposeAgent();
+const criticAgent = new CriticAgent();
 const reviewEngine = new ReviewRuleEngine();
 
 // Module-scoped context — set by the Nest.js processor before graph execution.
@@ -87,6 +89,11 @@ export async function planShotsNode(state: Phase2StateType): Promise<Partial<Pha
   return planAgent.runShots(getNodeCtx(), state);
 }
 
+// ── Critique node（LLM 自动质检，人工审批之前的一道关）──
+export async function critiqueShotsNode(state: Phase2StateType): Promise<Partial<Phase2StateType>> {
+  return criticAgent.critiqueShots(getNodeCtx(), state);
+}
+
 // ── Render shot images node (preview only, no interrupt) ──
 export async function renderShotImagesNode(state: Phase2StateType): Promise<Partial<Phase2StateType>> {
   const ctx = getNodeCtx();
@@ -120,10 +127,13 @@ function isApprovedResume(value: unknown): boolean {
 }
 
 export function outlineApprovalNode(state: Phase2StateType): Partial<Phase2StateType> {
+  // 🔬 临时探针：观察大纲门（新起 run 模式）会不会重跑
+  console.log(">>> [门] outline_approval 进入");
   const resumeValue = interrupt({
     question: "确认故事大纲？",
     gate: "outline_approval",
   });
+  console.log(">>> [门] outline_approval 拿到 resume =", JSON.stringify(resumeValue));
   return {
     approvalHistory: {
       ...(state.approvalHistory || {}),
@@ -133,10 +143,13 @@ export function outlineApprovalNode(state: Phase2StateType): Partial<Phase2State
 }
 
 export function charactersApprovalNode(state: Phase2StateType): Partial<Phase2StateType> {
+  // 🔬 临时探针：观察角色门（resume 模式）会不会重跑
+  console.log(">>> [门] characters_approval 进入");
   const resumeValue = interrupt({
     question: "确认角色设定？",
     gate: "characters_approval",
   });
+  console.log(">>> [门] characters_approval 拿到 resume =", JSON.stringify(resumeValue));
   return {
     approvalHistory: {
       ...(state.approvalHistory || {}),
@@ -158,15 +171,15 @@ export function shotsApprovalNode(state: Phase2StateType): Partial<Phase2StateTy
   };
 }
 
-export function composeApprovalNode(state: Phase2StateType): Partial<Phase2StateType> {
+export function shotImagesApprovalNode(state: Phase2StateType): Partial<Phase2StateType> {
   const resumeValue = interrupt({
-    question: "确认最终合成？",
-    gate: "compose_approval",
+    question: "确认镜头画面？",
+    gate: "shot_images_approval",
   });
   return {
     approvalHistory: {
       ...(state.approvalHistory || {}),
-      compose: isApprovedResume(resumeValue) ? "approved" : "rejected",
+      frames: isApprovedResume(resumeValue) ? "approved" : "rejected",
     },
   };
 }
@@ -200,9 +213,19 @@ export function routeAfterShotsApproval(state: Phase2StateType): RouteKey {
   return state.approvalHistory?.shots === "approved" ? "render_shot_images" : "plan_shots";
 }
 
-export function routeAfterComposeApproval(state: Phase2StateType): RouteKey {
+/**
+ * 自动审查之后的路由。
+ * 决策本身已由 CriticAgent 写进 nextStage（模型评估 → 状态 → 路由执行），
+ * 这里只负责把状态翻译成图上的目标节点，保持路由函数"纯函数"的简单性。
+ */
+export function routeAfterCritique(state: Phase2StateType): RouteKey {
   if (state.reviewRequested) return "review";
-  return state.approvalHistory?.compose === "approved" ? "__end__" : "review";
+  return state.nextStage === "plan_shots" ? "plan_shots" : "shots_approval";
+}
+
+export function routeAfterShotImagesApproval(state: Phase2StateType): RouteKey {
+  if (state.reviewRequested) return "review";
+  return state.approvalHistory?.frames === "approved" ? "compose_videos" : "render_shot_images";
 }
 
 export function routeAfterReview(state: Phase2StateType): RouteKey {

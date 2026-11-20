@@ -347,6 +347,8 @@ export interface AgentRun {
   project_id: number;
   status: string;
   current_agent?: string;
+  /** Approval gate the run is currently waiting on (human-in-the-loop). */
+  awaiting_gate?: string | null;
   progress?: number;
   error?: string | null;
   thread_id?: string;

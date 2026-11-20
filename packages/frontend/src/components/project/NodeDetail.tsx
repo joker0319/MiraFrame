@@ -106,6 +106,12 @@ export function NodeDetail({
             确认分镜
           </button>
         )}
+        {selectedNode.id === "shotImages" && awaitingConfirm && awaitingAgent === "frames" && (
+          <button onClick={() => onConfirm()} className="btn btn-primary btn-sm gap-1 shrink-0">
+            <CheckCircle2 className="h-4 w-4" />
+            确认画面
+          </button>
+        )}
       </div>
 
       {showMaterialIssue && (

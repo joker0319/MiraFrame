@@ -14,6 +14,11 @@ export const Phase2State = Annotation.Root({
   approvalHistory: Annotation<Record<string, string>>(),
   critiqueScores: Annotation<Record<string, number>>(),
   critiqueRound: Annotation<number>(),
+  /** 最近一次生成的产物文本（供 CriticAgent 审查）：分镜阶段由 PlanAgent 写入 */
+  artifactText: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
   artifactLineage: Annotation<Record<string, string[]>>(),
   routeStage: Annotation<string | null>(),
   routeMode: Annotation<"full" | "incremental">(),

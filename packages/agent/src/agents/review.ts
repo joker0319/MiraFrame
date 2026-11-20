@@ -14,7 +14,7 @@ export class ReviewRuleEngine extends BaseAgent {
       outline_approval: "plan_outline",
       characters_approval: "plan_characters",
       shots_approval: "plan_shots",
-      compose_approval: "compose_videos",
+      shot_images_approval: "render_shot_images",
     };
 
     const targetStage = routeMap[state.currentStage] || "plan_outline";

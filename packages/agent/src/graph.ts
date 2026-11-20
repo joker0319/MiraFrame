@@ -8,6 +8,7 @@ export function buildPhase2Graph() {
     .addNode("plan_outline", nodes.planOutlineNode)
     .addNode("plan_characters", nodes.planCharactersNode)
     .addNode("plan_shots", nodes.planShotsNode)
+    .addNode("critique_shots", nodes.critiqueShotsNode)
     .addNode("render_shot_images", nodes.renderShotImagesNode)
     .addNode("compose_videos", nodes.composeVideosNode)
 
@@ -15,7 +16,7 @@ export function buildPhase2Graph() {
     .addNode("outline_approval", nodes.outlineApprovalNode)
     .addNode("characters_approval", nodes.charactersApprovalNode)
     .addNode("shots_approval", nodes.shotsApprovalNode)
-    .addNode("compose_approval", nodes.composeApprovalNode)
+    .addNode("shot_images_approval", nodes.shotImagesApprovalNode)
 
     // Review node
     .addNode("review", nodes.reviewNode)
@@ -25,6 +26,7 @@ export function buildPhase2Graph() {
       plan_outline: "plan_outline",
       plan_characters: "plan_characters",
       plan_shots: "plan_shots",
+      critique_shots: "critique_shots",
       render_shot_images: "render_shot_images",
       compose_videos: "compose_videos",
       review: "review",
@@ -33,13 +35,20 @@ export function buildPhase2Graph() {
     // Production → Approval linear flow
     .addEdge("plan_outline", "outline_approval")
     .addEdge("plan_characters", "characters_approval")
-    .addEdge("plan_shots", "shots_approval")
 
-    // Render shot images → compose videos
-    .addEdge("render_shot_images", "compose_videos")
+    // Shots → 自动审查 → （通过）人工审批 / （不通过）回到 shots 重写
+    .addEdge("plan_shots", "critique_shots")
+    .addConditionalEdges("critique_shots", nodes.routeAfterCritique, {
+      shots_approval: "shots_approval",
+      plan_shots: "plan_shots",
+      review: "review",
+    })
 
-    // Compose videos → compose approval
-    .addEdge("compose_videos", "compose_approval")
+    // Render shot images → frames preview approval
+    .addEdge("render_shot_images", "shot_images_approval")
+
+    // Compose videos → end (the final video is the deliverable, no further gate)
+    .addEdge("compose_videos", END)
 
     // Approval → next stage or review
     .addConditionalEdges("outline_approval", nodes.routeAfterOutlineApproval, {
@@ -55,8 +64,9 @@ export function buildPhase2Graph() {
       render_shot_images: "render_shot_images",
       review: "review",
     })
-    .addConditionalEdges("compose_approval", nodes.routeAfterComposeApproval, {
-      __end__: END,
+    .addConditionalEdges("shot_images_approval", nodes.routeAfterShotImagesApproval, {
+      compose_videos: "compose_videos",
+      render_shot_images: "render_shot_images",
       review: "review",
     })
 

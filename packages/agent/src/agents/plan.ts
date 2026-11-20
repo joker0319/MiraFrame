@@ -24,7 +24,7 @@ export class PlanAgent extends BaseAgent {
     const response = await ctx.callLlm(
       CHARACTER_SYSTEM_PROMPT,
       userPrompt,
-      { maxTokens: 4096 },
+      { maxTokens: 4096, intent: "characters" },
     );
 
     let characters: Array<{ name: string; description: string }> = [];
@@ -83,7 +83,7 @@ export class PlanAgent extends BaseAgent {
     const response = await ctx.callLlm(
       SHOT_SYSTEM_PROMPT,
       userPrompt,
-      { maxTokens: 4096 },
+      { maxTokens: 4096, intent: "shots" },
     );
 
     let shots: Array<{
@@ -135,6 +135,8 @@ export class PlanAgent extends BaseAgent {
       }
     }
 
+    const lineage = ctx.getArtifactLineage ? await ctx.getArtifactLineage() : {};
+
     await ctx.sendMessage(`分镜脚本生成完成：${created.length} 个镜头`, {
       progress: 0.6,
       summary: `已创建 ${created.length} 个分镜`,
@@ -143,9 +145,13 @@ export class PlanAgent extends BaseAgent {
 
     return {
       currentStage: "plan_shots",
-      nextStage: "shots_approval",
+      nextStage: "critique_shots",
       stageHistory: ["plan_shots"],
       reviewRequested: false,
+      // 把本轮生成的分镜文本交给下游 CriticAgent 审查（图状态是节点之间唯一的数据通道）
+      artifactText: JSON.stringify(shots, null, 2),
+      // 产物血缘从数据库读回，让 state 里的这个字段不再是空转字段
+      artifactLineage: lineage,
     };
   }
 }

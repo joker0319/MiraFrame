@@ -19,3 +19,6 @@ export { setNodeContext, clearNodeContext, runWithNodeContext } from "./nodes/in
 
 // Prompts
 export * from "./prompts/index.js";
+
+// Tool layer (function calling + JSON fallback)
+export * from "./tools/index.js";

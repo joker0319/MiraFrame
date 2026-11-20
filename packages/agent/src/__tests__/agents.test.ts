@@ -87,7 +87,17 @@ describe("PlanAgent", () => {
     const state = mockState();
     const result = await agent.runShots(ctx, state);
     expect(result.currentStage).toBe("plan_shots");
-    expect(result.nextStage).toBe("shots_approval");
+    // 分镜生成后先进入自动审查节点，再决定是转人工还是回炉
+    expect(result.nextStage).toBe("critique_shots");
+    // 生成的文本要交给下游 CriticAgent，否则审查环节拿不到产物
+    expect(result.artifactText).toBeTruthy();
+  });
+
+  it("把持久化血缘写回 state，让 artifactLineage 不再是空转字段", async () => {
+    const lineage = { "character:1": ["shot:3", "shot:7"], "character:2": ["shot:3"] };
+    const ctx = mockCtx({ getArtifactLineage: async () => lineage });
+    const result = await new PlanAgent().runShots(ctx, mockState());
+    expect(result.artifactLineage).toEqual(lineage);
   });
 });
 
@@ -97,24 +107,90 @@ describe("CriticAgent", () => {
     expect(agent.name).toBe("critic");
   });
 
-  it("reviewCharacters returns scores and updates round", async () => {
+  it("通过阈值时：记录分数并转人工审批", async () => {
     const agent = new CriticAgent();
-    const ctx = mockCtx();
-    const state = mockState({ critiqueRound: 0, critiqueScores: {} });
-    const result = await agent.reviewCharacters(ctx, state);
+    const ctx = mockCtx({
+      callLlm: async () =>
+        '{"overall_score": 8.5, "dimensions": {"narrative": 9}, "issues": [], "suggestions": [], "needs_regenerate": false}',
+    });
+    const state = mockState({
+      critiqueRound: 0,
+      critiqueScores: {},
+      artifactText: '[{"order":1,"description":"开场"}]',
+    });
+
+    const result = await agent.critiqueShots(ctx, state);
+
     expect(result.critiqueRound).toBe(1);
-    expect(result.critiqueScores).toBeDefined();
-    expect(result.currentStage).toBe("critique_character_images");
+    expect(result.critiqueScores).toEqual({ shots_round_1: 8.5 });
+    expect(result.currentStage).toBe("critique_shots");
+    expect(result.nextStage).toBe("shots_approval");
+    expect(result.feedback).toBeNull();
   });
 
-  it("reviewShots returns scores and updates round", async () => {
+  it("低于阈值时：把意见写进 feedback 并回到 plan_shots 重写", async () => {
+    const agent = new CriticAgent();
+    const ctx = mockCtx({
+      callLlm: async () =>
+        '{"overall_score": 5, "issues": ["第3镜与第1镜场景矛盾"], "suggestions": ["统一场景描述"], "needs_regenerate": true}',
+    });
+    const state = mockState({
+      critiqueRound: 0,
+      critiqueScores: {},
+      artifactText: '[{"order":1,"description":"开场"}]',
+    });
+
+    const result = await agent.critiqueShots(ctx, state);
+
+    expect(result.nextStage).toBe("plan_shots");
+    expect(result.feedbackType).toBe("critique");
+    expect(result.feedback).toContain("第3镜与第1镜场景矛盾");
+    expect(result.feedback).toContain("统一场景描述");
+  });
+
+  it("达到最大轮次时：即使分数低也放行到人工审批（防止死循环）", async () => {
+    const agent = new CriticAgent();
+    const ctx = mockCtx({
+      callLlm: async () => '{"overall_score": 3, "issues": ["结构性问题"]}',
+    });
+    const state = mockState({
+      critiqueRound: 1, // 下一轮就是第 2 轮 = MAX_ROUNDS
+      critiqueScores: { shots_round_1: 3 },
+      artifactText: '[{"order":1,"description":"开场"}]',
+    });
+
+    const result = await agent.critiqueShots(ctx, state);
+
+    expect(result.critiqueRound).toBe(2);
+    expect(result.nextStage).toBe("shots_approval");
+  });
+
+  it("没有产物可审时：跳过审查直接转人工", async () => {
     const agent = new CriticAgent();
     const ctx = mockCtx();
     const state = mockState({ critiqueRound: 0, critiqueScores: {} });
-    const result = await agent.reviewShots(ctx, state);
-    expect(result.critiqueRound).toBe(1);
-    expect(result.critiqueScores).toBeDefined();
-    expect(result.currentStage).toBe("critique_shot_images");
+
+    const result = await agent.critiqueShots(ctx, state);
+
+    expect(result.nextStage).toBe("shots_approval");
+  });
+
+  it("LLM 调用失败时：降级为人工审批而不是中断流程", async () => {
+    const agent = new CriticAgent();
+    const ctx = mockCtx({
+      callLlm: async () => {
+        throw new Error("LLM timeout");
+      },
+    });
+    const state = mockState({
+      critiqueRound: 0,
+      critiqueScores: {},
+      artifactText: '[{"order":1,"description":"开场"}]',
+    });
+
+    const result = await agent.critiqueShots(ctx, state);
+
+    expect(result.nextStage).toBe("shots_approval");
   });
 });
 
@@ -132,5 +208,124 @@ describe("ReviewRuleEngine", () => {
     expect(result.routeStage).toBe("plan_outline");
     expect(result.routeMode).toBe("incremental");
     expect(result.reviewRequested).toBe(false);
+  });
+});
+
+const TOOL_FIXTURE = {
+  title: "工具测试大纲",
+  logline: "一段用于验证工具调用的梗概",
+  visual_bible: "水彩风格",
+  acts: [{ act: 1, title: "第一幕", summary: "开端" }],
+};
+
+describe("OutlineAgent 工具驱动（function calling）", () => {
+  it("模型自主决定先写草稿再落库，节点不再硬编码顺序", async () => {
+    const saved: Array<{ outline: Record<string, unknown>; visualBible?: string | null }> = [];
+    const decisions: string[] = [];
+
+    const ctx = mockCtx({
+      saveOutline: async (outline, visualBible) => {
+        saved.push({ outline, visualBible });
+      },
+      callLlmWithTools: async (messages) => {
+        const toolResults = messages.filter((m) => m.role === "tool").map((m) => m.content);
+        const hasDraft = toolResults.some((text) => text.includes("草稿已记录"));
+        const hasSaved = toolResults.some((text) => text.includes("大纲已保存"));
+
+        if (!hasDraft) {
+          decisions.push("write_outline_draft");
+          return {
+            content: "",
+            toolCalls: [{ id: "c1", name: "write_outline_draft", arguments: { outline: TOOL_FIXTURE } }],
+          };
+        }
+        if (!hasSaved) {
+          decisions.push("save_outline");
+          return {
+            content: "",
+            toolCalls: [{ id: "c2", name: "save_outline", arguments: { draftId: "draft-1" } }],
+          };
+        }
+        return { content: "全部完成", toolCalls: [] };
+      },
+    });
+
+    const result = await new OutlineAgent().run(ctx, mockState());
+
+    expect(decisions).toEqual(["write_outline_draft", "save_outline"]);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].outline).toEqual(TOOL_FIXTURE);
+    expect(saved[0].visualBible).toBe("水彩风格");
+    expect(result.nextStage).toBe("outline_approval");
+  });
+
+  it("工具执行失败时错误回填给模型，模型可以自我修正", async () => {
+    let calls = 0;
+    let sawError = false;
+    let saved = 0;
+
+    const ctx = mockCtx({
+      saveOutline: async () => {
+        saved++;
+      },
+      callLlmWithTools: async (messages) => {
+        calls++;
+        const toolResults = messages.filter((m) => m.role === "tool").map((m) => m.content);
+        if (toolResults.some((text) => text.startsWith("ERROR:"))) sawError = true;
+        const hasDraft = toolResults.some((text) => text.includes("草稿已记录"));
+        const hasSaved = toolResults.some((text) => text.includes("大纲已保存"));
+
+        if (calls === 1) {
+          return {
+            content: "",
+            toolCalls: [{ id: "bad", name: "write_outline_draft", arguments: { outline: "这不是 JSON" } }],
+          };
+        }
+        if (!hasDraft) {
+          return {
+            content: "",
+            toolCalls: [{ id: "good", name: "write_outline_draft", arguments: { outline: TOOL_FIXTURE } }],
+          };
+        }
+        if (!hasSaved) {
+          return {
+            content: "",
+            toolCalls: [{ id: "save", name: "save_outline", arguments: {} }],
+          };
+        }
+        return { content: "完成", toolCalls: [] };
+      },
+    });
+
+    await new OutlineAgent().run(ctx, mockState());
+
+    expect(sawError).toBe(true);
+    expect(calls).toBeGreaterThanOrEqual(3);
+    expect(saved).toBe(1);
+  });
+
+  it("模型没有 function calling 通道时自动降级为 JSON 协议", async () => {
+    let saved = 0;
+
+    const ctx = mockCtx({
+      saveOutline: async () => {
+        saved++;
+      },
+      callLlm: async (_system, prompt) => {
+        if (prompt.includes("请输出下一步的 JSON 工具调用")) {
+          if (!prompt.includes("草稿已记录")) {
+            return JSON.stringify({ tool: "write_outline_draft", arguments: { outline: TOOL_FIXTURE } });
+          }
+          if (!prompt.includes("大纲已保存")) {
+            return JSON.stringify({ tool: "save_outline", arguments: {} });
+          }
+        }
+        return JSON.stringify({ done: true, summary: "完成" });
+      },
+    });
+
+    await new OutlineAgent().run(ctx, mockState());
+
+    expect(saved).toBe(1);
   });
 });
