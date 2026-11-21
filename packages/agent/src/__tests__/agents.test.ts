@@ -38,6 +38,8 @@ function mockState(overrides?: Partial<Phase2StateType>): Phase2StateType {
     critiqueScores: {},
     critiqueRound: 0,
     artifactLineage: {},
+    executionPlan: [],
+    planRationale: "",
     routeStage: null,
     routeMode: "full",
     reviewRequested: false,
@@ -327,5 +329,52 @@ describe("OutlineAgent 工具驱动（function calling）", () => {
     await new OutlineAgent().run(ctx, mockState());
 
     expect(saved).toBe(1);
+  });
+});
+
+describe("ReviewRuleEngine 模型路由决策", () => {
+  it("模型根据反馈自主决定回退阶段（而非只按 currentStage 查表）", async () => {
+    const engine = new ReviewRuleEngine();
+    const ctx = mockCtx({
+      callLlm: async () =>
+        JSON.stringify({
+          targetStage: "render_shot_images",
+          mode: "incremental",
+          rationale: "反馈只涉及色调，脚本无需重做",
+        }),
+    });
+    const state = mockState({
+      currentStage: "shots_approval",
+      feedback: "把画面调暖一点",
+      feedbackType: "style",
+    });
+    const result = await engine.run(ctx, state);
+    // 规则查表会给 render_shot_images 吗？不会——查表 shots_approval → plan_shots
+    // 这里被模型改成了 render_shot_images，证明决策权在模型
+    expect(result.routeStage).toBe("render_shot_images");
+    expect(result.routeMode).toBe("incremental");
+  });
+
+  it("模型输出非法阶段时回退规则映射", async () => {
+    const engine = new ReviewRuleEngine();
+    const ctx = mockCtx({
+      callLlm: async () => JSON.stringify({ targetStage: "hack_stage", mode: "full" }),
+    });
+    const state = mockState({ currentStage: "shots_approval" });
+    const result = await engine.run(ctx, state);
+    expect(result.routeStage).toBe("plan_shots");
+    expect(result.routeMode).toBe("incremental");
+  });
+
+  it("LLM 不可用时回退规则映射且不崩溃", async () => {
+    const engine = new ReviewRuleEngine();
+    const ctx = mockCtx({
+      callLlm: async () => {
+        throw new Error("offline");
+      },
+    });
+    const state = mockState({ currentStage: "outline_approval" });
+    const result = await engine.run(ctx, state);
+    expect(result.routeStage).toBe("plan_outline");
   });
 });

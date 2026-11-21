@@ -9,6 +9,8 @@ export type { AgentContext } from "./agents/base.js";
 export { OutlineAgent } from "./agents/outline.js";
 export { PlanAgent } from "./agents/plan.js";
 export { ComposeAgent } from "./agents/compose.js";
+export { DirectorAgent } from "./agents/director.js";
+export type { DirectorPlan } from "./agents/director.js";
 export { ReviewRuleEngine } from "./agents/review.js";
 
 // Nodes (for testing)

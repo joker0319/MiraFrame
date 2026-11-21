@@ -32,6 +32,8 @@ describe("Phase2 Graph", () => {
       critiqueScores: {},
       critiqueRound: 0,
       artifactLineage: {},
+      executionPlan: [],
+      planRationale: "",
       routeStage: null,
       routeMode: "full" as const,
       reviewRequested: false,
@@ -51,7 +53,7 @@ describe("Phase2 Graph", () => {
     }
   });
 
-  it("has the expected nodes: 5 production + 4 approval + 1 review", () => {
+  it("has the expected nodes: director + 5 production + 4 approval + 1 review", () => {
     const graph = buildPhase2Graph();
     const compiled = graph.compile({ checkpointer: new MemorySaver() });
 
@@ -78,7 +80,10 @@ describe("Phase2 Graph", () => {
     // 自动审查节点（LLM 质检，位于 plan_shots 与人工审批之间）
     expect(nodeNames).toContain("critique_shots");
 
-    expect(nodeNames).toHaveLength(13);
+    // Supervisor（导演）节点：路径决策的入口
+    expect(nodeNames).toContain("director");
+
+    expect(nodeNames).toHaveLength(14);
   });
 
   it("自动审查后的路由由 critic 的结论驱动", () => {

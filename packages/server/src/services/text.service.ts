@@ -222,6 +222,30 @@ export class TextService {
     // (e.g. the project context embeds the approved outline's "shots").
     const normalized = (intent || prompt).toLowerCase();
 
+    // Director（Supervisor）规划：演示用，返回一个跳过角色图阶段的短篇计划，
+    // 让"模型决定路径"在本地 fake 模式下也能被观察到。
+    if (normalized.includes("director-plan")) {
+      return JSON.stringify({
+        steps: ["plan_outline", "plan_shots", "critique_shots", "render_shot_images", "compose_videos"],
+        rationale: "短篇样片，跳过独立角色图阶段以节省时间，保留质检与成片环节。",
+      });
+    }
+
+    // Review 路由决策：根据反馈类型演示不同的回退目标
+    if (normalized.includes("review-route")) {
+      const p = prompt.toLowerCase();
+      let targetStage = "plan_shots";
+      if (p.includes("角色") || p.includes("character")) targetStage = "plan_characters";
+      else if (p.includes("大纲") || p.includes("剧情") || p.includes("结构")) targetStage = "plan_outline";
+      else if (p.includes("画面") || p.includes("色调") || p.includes("风格")) targetStage = "render_shot_images";
+      else if (p.includes("剪辑") || p.includes("时长") || p.includes("顺序")) targetStage = "compose_videos";
+      return JSON.stringify({
+        targetStage,
+        mode: "incremental",
+        rationale: `反馈指向${targetStage}，采用增量模式复用其余产物。`,
+      });
+    }
+
     if (normalized.includes("shot")) {
       return JSON.stringify({
         shots: [
