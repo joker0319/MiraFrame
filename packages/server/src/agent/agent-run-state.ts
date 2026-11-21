@@ -121,6 +121,9 @@ export function buildInitialState(input: GenerationInput): Phase2StateType {
     // 自动审查的输入：由 PlanAgent 在 plan_shots 阶段写入，CriticAgent 读取
     artifactText: "",
     artifactLineage: {},
+    // 执行计划由 Director 节点在 graph 入口生成，此处留空
+    executionPlan: [],
+    planRationale: "",
     routeStage: null,
     routeMode: input.mode,
     reviewRequested: false,

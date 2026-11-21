@@ -4,6 +4,8 @@ import * as nodes from "./nodes/index.js";
 
 export function buildPhase2Graph() {
   const graph = new StateGraph(Phase2State)
+    // Supervisor node — plans the execution path before any production work
+    .addNode("director", nodes.directorNode)
     // Production nodes
     .addNode("plan_outline", nodes.planOutlineNode)
     .addNode("plan_characters", nodes.planCharactersNode)
@@ -21,8 +23,10 @@ export function buildPhase2Graph() {
     // Review node
     .addNode("review", nodes.reviewNode)
 
-    // Entry point — supports resuming from a requested stage.
-    .addConditionalEdges(START, nodes.routeFromStart, {
+    // Entry point → Director (Supervisor) plans the path first.
+    // routeAfterDirector may target any production stage from the plan, so all are mapped.
+    .addEdge(START, "director")
+    .addConditionalEdges("director", nodes.routeAfterDirector, {
       plan_outline: "plan_outline",
       plan_characters: "plan_characters",
       plan_shots: "plan_shots",
@@ -53,6 +57,8 @@ export function buildPhase2Graph() {
     // Approval → next stage or review
     .addConditionalEdges("outline_approval", nodes.routeAfterOutlineApproval, {
       plan_characters: "plan_characters",
+      // Director 可裁掉角色阶段 → 大纲审批后直接进分镜
+      plan_shots: "plan_shots",
       plan_outline: "plan_outline",
       review: "review",
     })

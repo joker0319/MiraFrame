@@ -7,6 +7,7 @@ import { PlanAgent } from "../agents/plan.js";
 import { ComposeAgent } from "../agents/compose.js";
 import { CriticAgent } from "../agents/critic.js";
 import { ReviewRuleEngine } from "../agents/review.js";
+import { DirectorAgent } from "../agents/director.js";
 
 // Factory to create agent instances
 const outlineAgent = new OutlineAgent();
@@ -14,6 +15,35 @@ const planAgent = new PlanAgent();
 const composeAgent = new ComposeAgent();
 const criticAgent = new CriticAgent();
 const reviewEngine = new ReviewRuleEngine();
+const directorAgent = new DirectorAgent();
+
+/** 图的完整生产链路：plan 的校验基准，也是"跳过阶段"时向后查找的顺序 */
+const PIPELINE = [
+  "plan_outline",
+  "plan_characters",
+  "plan_shots",
+  "critique_shots",
+  "render_shot_images",
+  "compose_videos",
+] as const;
+
+/** 当前 run 实际执行的阶段集合。空 plan（老数据 / 恢复态）按全链路处理。 */
+function activeStages(state: Phase2StateType): string[] {
+  return state.executionPlan && state.executionPlan.length ? state.executionPlan : [...PIPELINE];
+}
+
+/**
+ * 沿流水线向后找第一个"在计划里"的阶段。
+ * 这样 Director 跳过某阶段时，门结构不用改，只是路由跳过了被裁掉的环节。
+ */
+function nextEnabled(state: Phase2StateType, from: string): string {
+  const enabled = new Set(activeStages(state));
+  const start = PIPELINE.indexOf(from as (typeof PIPELINE)[number]);
+  for (let i = start + 1; i < PIPELINE.length; i++) {
+    if (enabled.has(PIPELINE[i])) return PIPELINE[i];
+  }
+  return "compose_videos";
+}
 
 // Module-scoped context — set by the Nest.js processor before graph execution.
 let _nodeCtx: AgentContext | null = null;
@@ -57,6 +87,17 @@ function getNodeCtx(): AgentContext {
     generateShotVideos: async () => { void 0; },
     composeProjectVideo: async () => { void 0; },
   };
+}
+
+// ── Director node (Supervisor) ──
+export async function directorNode(state: Phase2StateType): Promise<Partial<Phase2StateType>> {
+  // 指定阶段启动（局部重生成 / 断点重启）与已有计划（checkpoint 恢复）时，
+  // 不再重新规划 —— 保证恢复机制与人工指定的路径不被模型覆盖。
+  const isTargetedStart = state.currentStage && state.currentStage !== "plan_outline";
+  if (isTargetedStart || (state.executionPlan && state.executionPlan.length > 0)) {
+    return {};
+  }
+  return directorAgent.plan(getNodeCtx(), state);
 }
 
 // ── Outline node ──
@@ -196,15 +237,29 @@ export function routeFromStart(state: Phase2StateType): RouteKey {
   return state.currentStage || "plan_outline";
 }
 
+/**
+ * Director 之后的路由：从模型生成的执行计划里取第一个启用的阶段。
+ * 这样"先走哪一步"由模型决定，而不是写死 plan_outline。
+ * 恢复 / 指定阶段场景（executionPlan 为空）退回 currentStage，保证 checkpoint 续跑不变。
+ */
+export function routeAfterDirector(state: Phase2StateType): RouteKey {
+  if (state.reviewRequested) return "review";
+  if (!state.executionPlan || state.executionPlan.length === 0) {
+    return state.currentStage || "plan_outline";
+  }
+  const enabled = new Set(activeStages(state));
+  return PIPELINE.find((stage) => enabled.has(stage)) || "plan_outline";
+}
+
 export function routeAfterOutlineApproval(state: Phase2StateType): RouteKey {
   if (state.reviewRequested) return "review";
-  // If rejected, regenerate outline; if approved, move to characters
-  return state.approvalHistory?.outline === "approved" ? "plan_characters" : "plan_outline";
+  // If rejected, regenerate outline; if approved, move to the next stage the Director kept
+  return state.approvalHistory?.outline === "approved" ? nextEnabled(state, "plan_outline") : "plan_outline";
 }
 
 export function routeAfterCharactersApproval(state: Phase2StateType): RouteKey {
   if (state.reviewRequested) return "review";
-  // Characters always approved → move to shots
+  // 角色阶段被保留时才会走到此门，之后固定进分镜（分镜是必需阶段）
   return state.approvalHistory?.characters === "approved" ? "plan_shots" : "plan_characters";
 }
 
@@ -226,6 +281,11 @@ export function routeAfterCritique(state: Phase2StateType): RouteKey {
 export function routeAfterShotImagesApproval(state: Phase2StateType): RouteKey {
   if (state.reviewRequested) return "review";
   return state.approvalHistory?.frames === "approved" ? "compose_videos" : "render_shot_images";
+}
+
+/** 导出供测试：Director 跳过某阶段后，下一跳是否正确 */
+export function __nextEnabledForTest(state: Phase2StateType, from: string): string {
+  return nextEnabled(state, from);
 }
 
 export function routeAfterReview(state: Phase2StateType): RouteKey {

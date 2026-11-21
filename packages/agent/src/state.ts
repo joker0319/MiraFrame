@@ -20,6 +20,16 @@ export const Phase2State = Annotation.Root({
     default: () => "",
   }),
   artifactLineage: Annotation<Record<string, string[]>>(),
+  /** Director（Supervisor）生成的执行计划：本轮要执行的阶段序列，白名单受控 */
+  executionPlan: Annotation<string[]>({
+    reducer: (_prev, next) => next,
+    default: () => [],
+  }),
+  /** Director 的决策理由，前端可视化 */
+  planRationale: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
   routeStage: Annotation<string | null>(),
   routeMode: Annotation<"full" | "incremental">(),
   reviewRequested: Annotation<boolean>(),
