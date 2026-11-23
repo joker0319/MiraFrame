@@ -4,19 +4,16 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { projectsApi } from "@/services/projectsApi";
-import { useThemeStore } from "@/stores/themeStore";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { GenerationServiceNotice } from "@/components/settings/GenerationServiceNotice";
+import { TopBar } from "@/components/layout/TopBar";
 import { BRAND } from "@/lib/brand";
-import { Moon, Settings, Sparkles, Sun, Trash2 } from "lucide-react";
+import { ArrowUpRight, FolderOpen, Plus, Trash2 } from "lucide-react";
 import type { Project } from "@/types";
 
 export default function ProjectsPage() {
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<number[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const { isDark, toggleTheme } = useThemeStore();
-  const { openModal: openSettings } = useSettingsStore();
 
   const { data: projects, isLoading, error } = useQuery({
     queryKey: ["projects"],
@@ -56,136 +53,171 @@ export default function ProjectsPage() {
     setDeleteTarget([...selectedIds]);
   };
 
-  const getStatusBadge = (status?: string | null) => {
-    if (status === "ready") return <span className="badge badge-success badge-sm">ready</span>;
+  const renderStatus = (status?: string | null) => {
+    if (status === "ready")
+      return <span className="badge badge-success badge-sm">已完成</span>;
     if (status === "processing" || status === "running")
-      return <span className="badge badge-warning badge-sm animate-pulse">generating</span>;
-    return <span className="badge badge-secondary badge-sm">{status || "draft"}</span>;
+      return <span className="badge badge-warning badge-sm">生成中</span>;
+    if (status === "failed")
+      return <span className="badge badge-error badge-sm">失败</span>;
+    return <span className="badge badge-outline badge-sm">草稿</span>;
   };
 
   return (
-    <div className="min-h-screen bg-base-100">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 h-10 border-b border-base-300">
-        <Link to="/" className="flex items-center gap-2 text-sm font-semibold">
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Sparkles className="h-4 w-4" />
-          </span>
-          {BRAND.name}
-        </Link>
-        <div className="flex items-center gap-1">
-          <Link to="/" className="btn btn-ghost btn-xs">
-            新建
-          </Link>
-          <button onClick={toggleTheme} className="btn btn-ghost btn-xs btn-circle" aria-label="主题">
-            {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
-          <button onClick={openSettings} className="btn btn-ghost btn-xs btn-circle" aria-label="设置">
-            <Settings className="h-4 w-4" />
-          </button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-paper">
+      <TopBar />
 
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        {/* Sub-header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold mb-2">全部项目</h1>
-          <p className="mb-4 text-sm text-muted-foreground">管理 {BRAND.cnName} 里的漫剧项目与生成记录。</p>
-          <GenerationServiceNotice />
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={toggleSelectAll}
-                disabled={!projects?.length}
-                className="checkbox"
-              />
-              全选
-            </label>
-            <button
-              onClick={handleBatchDelete}
-              disabled={selectedIds.length === 0}
-              className="btn btn-destructive btn-sm"
-            >
-              批量删除（{selectedIds.length}）
-            </button>
+      <main className="mx-auto w-full max-w-4xl px-5 py-10">
+        {/* 页头 */}
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div>
+            <h1 className="font-serif text-[26px] leading-tight tracking-[-0.02em] text-ink-1">
+              全部项目
+            </h1>
+            <p className="mt-1.5 text-[12.5px] text-ink-3">
+              {projects?.length
+                ? `共 ${projects.length} 个漫剧项目，按最近更新排列`
+                : `管理 ${BRAND.cnName} 里的漫剧项目与生成记录`}
+            </p>
           </div>
+          <Link to="/" className="btn btn-primary gap-1.5">
+            <Plus className="h-4 w-4" strokeWidth={1.8} />
+            新建项目
+          </Link>
         </div>
 
-        {/* Content */}
+        <GenerationServiceNotice />
+
+        {/* 工具条 */}
+        <div className="mb-3 flex items-center justify-between gap-3 border-y border-line-soft py-2.5">
+          <label className="flex cursor-pointer select-none items-center gap-2 text-[12.5px] text-ink-2">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleSelectAll}
+              disabled={!projects?.length}
+              className="checkbox"
+            />
+            全选
+            {selectedIds.length > 0 && (
+              <span className="font-mono text-[11px] text-ink-3 tabular-nums">
+                已选 {selectedIds.length}
+              </span>
+            )}
+          </label>
+          <button
+            onClick={handleBatchDelete}
+            disabled={selectedIds.length === 0}
+            className="btn btn-ghost btn-sm gap-1.5 text-ink-2 hover:text-error"
+          >
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+            批量删除
+          </button>
+        </div>
+
+        {/* 内容 */}
         {isLoading && (
-          <div className="flex flex-col items-center justify-center py-16 gap-4">
-            <span className="loading loading-spinner loading-lg" />
-            <p className="text-muted-foreground">加载中...</p>
+          <div className="flex flex-col items-center justify-center gap-3 py-20">
+            <span className="loading loading-spinner" />
+            <p className="text-[12.5px] text-ink-3">正在读取项目列表</p>
           </div>
         )}
 
         {error && (
-          <div className="card text-center py-12">
-            <p className="text-destructive font-bold">加载项目失败，请重试。</p>
+          <div className="alert alert-error" role="alert">
+            <span>加载项目失败，请刷新重试。</span>
           </div>
         )}
 
         {!isLoading && !error && (!projects || projects.length === 0) && (
-          <div className="card text-center py-16">
-            <p className="text-4xl mb-4">📄</p>
-            <p className="text-lg font-bold mb-2">暂无项目</p>
-            <p className="text-muted-foreground text-sm">开始创作你的第一个故事吧！</p>
+          <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed border-line py-20">
+            <FolderOpen className="h-7 w-7 text-ink-4" strokeWidth={1.4} />
+            <p className="text-[13px] text-ink-2">还没有项目</p>
+            <p className="text-[12px] text-ink-3">从首页写下第一段故事开始。</p>
+            <Link to="/" className="btn btn-ghost btn-sm mt-1">
+              回到首页
+            </Link>
           </div>
         )}
 
         {!isLoading && !error && projects && projects.length > 0 && (
-          <div className="space-y-2">
-            {projects.map((project) => (
-              <Link
-                key={project.id}
-                to={`/project/${project.id}`}
-                className="card group hover:-translate-y-0.5 transition-transform block cursor-pointer"
-              >
-                <div className="flex items-center gap-3 p-4">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.includes(project.id)}
-                    onChange={() => toggleSelect(project.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="checkbox"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold truncate">{project.title}</span>
-                      {getStatusBadge(project.status)}
-                    </div>
-                    {project.story && (
-                      <p className="text-sm text-muted-foreground truncate mt-1">
-                        {project.story}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={(e) => handleDeleteClick(project.id, e)}
-                    className="opacity-0 group-hover:opacity-100 p-2 hover:bg-error/10 rounded-lg transition-all"
-                    title="删除"
+          <ul className="overflow-hidden rounded-md border border-line bg-surface">
+            {projects.map((project: Project) => {
+              const selected = selectedIds.includes(project.id);
+              return (
+                <li key={project.id} className="border-b border-line-soft last:border-b-0">
+                  <div
+                    className={`group flex items-center gap-3 px-4 py-3 transition-colors duration-150 ${
+                      selected ? "bg-primary/[0.04]" : "hover:bg-base-200/70"
+                    }`}
                   >
-                    <Trash2 className="h-4 w-4 text-error" />
-                  </button>
-                </div>
-              </Link>
-            ))}
-          </div>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggleSelect(project.id)}
+                      className="checkbox"
+                      aria-label={`选择 ${project.title}`}
+                    />
+                    <Link
+                      to={`/project/${project.id}`}
+                      className="flex min-w-0 flex-1 items-center gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[13.5px] font-medium text-ink-1">
+                            {project.title}
+                          </span>
+                          {renderStatus(project.status)}
+                        </div>
+                        {project.story && (
+                          <p className="mt-0.5 truncate text-[12px] text-ink-3">
+                            {project.story}
+                          </p>
+                        )}
+                      </div>
+                      <ArrowUpRight
+                        className="h-4 w-4 shrink-0 text-ink-4 transition-colors duration-150 group-hover:text-ink-2"
+                        strokeWidth={1.6}
+                      />
+                    </Link>
+                    <button
+                      onClick={(e) => handleDeleteClick(project.id, e)}
+                      className="shrink-0 rounded p-1.5 text-ink-4 opacity-0 transition-all duration-150 hover:bg-error-tint hover:text-error group-hover:opacity-100 focus-visible:opacity-100"
+                      title="删除项目"
+                      aria-label={`删除 ${project.title}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
-      </div>
+      </main>
 
-      {/* Delete confirmation */}
+      {/* 删除确认 */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDeleteTarget(null)}>
-          <div className="bg-base-100 rounded-2xl max-w-md w-full p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-2">删除项目</h3>
-            <p className="text-muted-foreground text-sm mb-6">
-              确定要删除选中的 {deleteTarget.length} 个项目吗？删除后无法恢复。
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"
+          onClick={() => setDeleteTarget(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="确认删除项目"
+        >
+          <div
+            className="card w-full max-w-sm p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-[15px] font-semibold text-ink-1">删除项目</h3>
+            <p className="mt-2 text-[12.5px] leading-7 text-ink-2">
+              将删除选中的 {deleteTarget.length} 个项目，包含其大纲、角色、分镜与成片记录。此操作不可撤销。
             </p>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setDeleteTarget(null)} className="btn btn-ghost btn-sm">
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="btn btn-ghost btn-sm"
+              >
                 取消
               </button>
               <button
@@ -193,7 +225,7 @@ export default function ProjectsPage() {
                 disabled={deleteMutation.isPending}
                 className="btn btn-destructive btn-sm"
               >
-                {deleteMutation.isPending ? "删除中..." : "删除"}
+                {deleteMutation.isPending ? "删除中" : "确认删除"}
               </button>
             </div>
           </div>

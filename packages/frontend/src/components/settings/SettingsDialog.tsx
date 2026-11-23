@@ -112,25 +112,25 @@ export function SettingsDialog() {
   const savePayload = buildSavePayload(draft, itemByKey);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/45 p-4 flex items-center justify-center">
-      <div className="w-full max-w-5xl max-h-[88vh] rounded-lg border border-base-300 bg-base-100 shadow-2xl overflow-hidden flex flex-col">
-        <header className="h-14 shrink-0 border-b border-base-300 px-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <Settings className="h-4 w-4" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] bg-paper shadow-[0_20px_56px_rgba(25,25,23,0.18)] ring-1 ring-line">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-[4px] bg-primary/[0.07] text-primary ring-1 ring-primary/15">
+              <Settings className="h-3.5 w-3.5" strokeWidth={1.8} />
             </span>
             <div>
-              <p className="text-sm font-semibold">生成服务设置</p>
-              <p className="text-xs text-muted-foreground">配置 MiraFrame 的文本、图像和视频生成能力</p>
+              <p className="font-serif text-[14px] font-medium text-ink-1">生成服务设置</p>
+              <p className="text-[11.5px] text-ink-3">配置 MiraFrame 的文本、图像和视频生成能力</p>
             </div>
           </div>
           <button type="button" className="btn btn-ghost btn-circle" onClick={closeModal} aria-label="关闭设置">
-            <XCircle className="h-5 w-5" />
+            <XCircle className="h-4 w-4" strokeWidth={1.8} />
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 grid grid-cols-[220px_1fr]">
-          <aside className="border-r border-base-300 bg-base-200/60 p-3">
+        <div className="grid min-h-0 flex-1 grid-cols-[220px_1fr]">
+          <aside className="border-r border-line bg-base-200 p-2.5">
             {(Object.keys(SERVICE_CONFIG) as ServiceKey[]).map((key) => {
               const config = SERVICE_CONFIG[key];
               const Icon = config.icon;
@@ -141,14 +141,16 @@ export function SettingsDialog() {
                   type="button"
                   onClick={() => setActive(key)}
                   className={cn(
-                    "w-full rounded-md px-3 py-2 text-left flex items-start gap-2 transition-colors",
-                    active === key ? "bg-base-100 text-base-content shadow-sm" : "hover:bg-base-100/70 text-muted-foreground",
+                    "flex w-full items-start gap-2 rounded-[5px] px-2.5 py-2 text-left transition-colors duration-150",
+                    active === key
+                      ? "bg-surface text-ink-1 shadow-[inset_0_0_0_1px_var(--color-line)]"
+                      : "text-ink-3 hover:bg-surface/70 hover:text-ink-2",
                   )}
                 >
-                  <Icon className="h-4 w-4 mt-0.5 shrink-0" />
+                  <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.7} />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium">{config.title}</span>
-                    <span className="block text-[11px] mt-0.5">{result ? result.message : config.description}</span>
+                    <span className="block text-[12.5px] font-medium">{config.title}</span>
+                    <span className="mt-0.5 block text-[11px] leading-5">{result ? result.message : config.description}</span>
                   </span>
                   {result && (
                     <span className={cn("mt-0.5 h-2 w-2 rounded-full", result.success ? "bg-success" : "bg-error")} />
@@ -169,31 +171,38 @@ export function SettingsDialog() {
               <div className="space-y-5">
                 <section className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                      <ActiveIcon className="h-5 w-5" />
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-[6px] bg-primary/[0.07] text-primary ring-1 ring-primary/15">
+                      <ActiveIcon className="h-4 w-4" strokeWidth={1.7} />
                     </span>
                     <div>
-                      <h2 className="text-lg font-semibold">{activeConfig.title}</h2>
-                      <p className="text-sm text-muted-foreground mt-1">{activeConfig.description}</p>
+                      <h2 className="font-serif text-[16px] font-medium text-ink-1">{activeConfig.title}</h2>
+                      <p className="mt-1 text-[12px] leading-6 text-ink-3">{activeConfig.description}</p>
                     </div>
                   </div>
                   <button
                     type="button"
-                    className="btn btn-outline btn-sm gap-1"
+                    className="btn btn-outline btn-sm gap-1.5"
                     disabled={testMutation.isPending}
                     onClick={() => testMutation.mutate(active)}
                   >
-                    {testMutation.isPending ? <span className="loading loading-spinner loading-xs" /> : <FlaskConical className="h-4 w-4" />}
+                    {testMutation.isPending ? <span className="loading loading-spinner loading-xs" /> : <FlaskConical className="h-3.5 w-3.5" strokeWidth={1.8} />}
                     测试连接
                   </button>
                 </section>
 
                 {testResult[active] && (
-                  <div className={cn("rounded-lg border p-3 text-sm flex items-start gap-2", testResult[active]?.success ? "border-success/30 bg-success/10" : "border-error/30 bg-error/10")}>
-                    {testResult[active]?.success ? <CheckCircle2 className="h-4 w-4 text-success mt-0.5" /> : <XCircle className="h-4 w-4 text-error mt-0.5" />}
+                  <div
+                    className={cn(
+                      "flex items-start gap-2 rounded-[6px] p-3 text-[12px]",
+                      testResult[active]?.success
+                        ? "bg-success-tint shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-success)_22%,transparent)]"
+                        : "bg-error-tint shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-error)_22%,transparent)]",
+                    )}
+                  >
+                    {testResult[active]?.success ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-success" strokeWidth={1.8} /> : <XCircle className="mt-0.5 h-4 w-4 text-error" strokeWidth={1.8} />}
                     <div>
-                      <p className="font-medium">{testResult[active]?.message}</p>
-                      {testResult[active]?.details && <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{testResult[active]?.details}</p>}
+                      <p className="font-medium text-ink-1">{testResult[active]?.message}</p>
+                      {testResult[active]?.details && <p className="mt-1 whitespace-pre-wrap text-[11.5px] leading-5 text-ink-3">{testResult[active]?.details}</p>}
                     </div>
                   </div>
                 )}
@@ -211,7 +220,7 @@ export function SettingsDialog() {
                   ))}
                 </div>
 
-                <div className="rounded-lg border border-base-300 bg-base-200/50 p-3 text-xs text-muted-foreground">
+                <div className="rounded-[6px] bg-base-200 p-3 text-[11.5px] leading-6 text-ink-3">
                   API Key 留空会清除当前配置；脱敏值未修改时不会覆盖原始密钥。图像和视频测试为配置完整性检查，不会实际消耗生成额度。
                 </div>
               </div>
@@ -219,8 +228,8 @@ export function SettingsDialog() {
           </main>
         </div>
 
-        <footer className="shrink-0 border-t border-base-300 px-4 py-3 flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line px-4 py-3">
+          <p className="text-[11.5px] text-ink-3">
             {updateMutation.data?.message || "设置会保存到本地 .env，并在当前服务进程中立即更新。"}
           </p>
           <div className="flex items-center gap-2">
@@ -260,10 +269,10 @@ function ConfigField({
   const isProvider = PROVIDER_KEYS.has(key);
 
   return (
-    <label className="rounded-lg border border-base-300 bg-base-100 p-3">
+    <label className="rounded-[6px] bg-surface p-3 shadow-[inset_0_0_0_1px_var(--color-line-soft)]">
       <span className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">{LABELS[key] || key}</span>
-        <span className="text-[10px] text-muted-foreground">{item?.source || "default"}</span>
+        <span className="text-[11.5px] font-medium text-ink-2">{LABELS[key] || key}</span>
+        <span className="font-mono text-[10px] text-ink-4">{item?.source || "default"}</span>
       </span>
       {isProvider ? (
         <select className="select mt-2" value={value || "fake"} onChange={(event) => onChange(event.target.value)}>
@@ -292,8 +301,8 @@ function ConfigField({
         </div>
       )}
       {isSecret && (
-        <span className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-          <KeyRound className="h-3 w-3" />
+        <span className="mt-2 flex items-center gap-1 text-[10.5px] text-ink-4">
+          <KeyRound className="h-3 w-3" strokeWidth={1.8} />
           密钥会脱敏展示
         </span>
       )}

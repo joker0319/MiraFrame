@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import type React from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/TopBar";
@@ -13,166 +12,47 @@ import {
   ChevronDown,
   Plus,
   SlidersHorizontal,
-  Sparkles,
   X,
+  FileText,
+  Users,
+  Film,
+  Image as ImageIcon,
+  Clapperboard,
 } from "lucide-react";
 
-const STYLES: { slug: string; label: string; category: string; mood: string }[] = [
-  // 2D Animation
-  { slug: "anime", label: "日式动漫", category: "2D 动画", mood: "清透 / 高光" },
-  { slug: "shonen", label: "热血少年", category: "2D 动画", mood: "速度线 / 爆发" },
-  { slug: "slice-of-life", label: "日常系", category: "2D 动画", mood: "柔光 / 治愈" },
-  { slug: "manga", label: "黑白漫画", category: "2D 动画", mood: "网点 / 线稿" },
-  { slug: "donghua", label: "国风动画", category: "2D 动画", mood: "水墨 / 云气" },
-  { slug: "guofeng-manga", label: "国风漫画", category: "2D 动画", mood: "卷轴 / 墨线" },
-  // 3D Styles
-  { slug: "cinematic", label: "电影级", category: "3D 风格", mood: "宽银幕 / 质感" },
-  { slug: "pixar", label: "皮克斯", category: "3D 风格", mood: "圆润 / 明亮" },
-  { slug: "cyberpunk", label: "赛博朋克", category: "3D 风格", mood: "霓虹 / 夜色" },
-  { slug: "lowpoly", label: "低多边形", category: "3D 风格", mood: "几何 / 玩具感" },
-  // Art Styles
-  { slug: "watercolor", label: "水彩", category: "艺术风格", mood: "晕染 / 纸纹" },
-  { slug: "fairy-tale", label: "童话", category: "艺术风格", mood: "梦境 / 暖光" },
-  { slug: "sketch", label: "素描", category: "艺术风格", mood: "铅笔 / 草图" },
-  { slug: "realistic", label: "写实", category: "艺术风格", mood: "自然光 / 细节" },
+/* 风格谱系：保留真实的封面图（具体信息），去掉装饰性渐变。
+   tone 仅用于极小面积的代表色点，全部为低饱和。 */
+const STYLES: {
+  slug: string;
+  label: string;
+  category: string;
+  mood: string;
+  cover: number;
+  tone: string;
+}[] = [
+  { slug: "anime", label: "日式动漫", category: "2D 动画", mood: "清透 / 高光", cover: 2, tone: "#7d8aa8" },
+  { slug: "shonen", label: "热血少年", category: "2D 动画", mood: "速度线 / 爆发", cover: 2, tone: "#a85c4a" },
+  { slug: "slice-of-life", label: "日常系", category: "2D 动画", mood: "柔光 / 治愈", cover: 1, tone: "#a89478" },
+  { slug: "manga", label: "黑白漫画", category: "2D 动画", mood: "网点 / 线稿", cover: 3, tone: "#6f6a62" },
+  { slug: "donghua", label: "国风动画", category: "2D 动画", mood: "水墨 / 云气", cover: 4, tone: "#5d7a6b" },
+  { slug: "guofeng-manga", label: "国风漫画", category: "2D 动画", mood: "卷轴 / 墨线", cover: 4, tone: "#8a6a4a" },
+  { slug: "cinematic", label: "电影级", category: "3D 风格", mood: "宽银幕 / 质感", cover: 6, tone: "#4a4a52" },
+  { slug: "pixar", label: "皮克斯", category: "3D 风格", mood: "圆润 / 明亮", cover: 2, tone: "#b08a5a" },
+  { slug: "cyberpunk", label: "赛博朋克", category: "3D 风格", mood: "霓虹 / 夜色", cover: 5, tone: "#6b5a82" },
+  { slug: "lowpoly", label: "低多边形", category: "3D 风格", mood: "几何 / 玩具感", cover: 3, tone: "#7a8478" },
+  { slug: "watercolor", label: "水彩", category: "艺术风格", mood: "晕染 / 纸纹", cover: 1, tone: "#8fa2b0" },
+  { slug: "fairy-tale", label: "童话", category: "艺术风格", mood: "梦境 / 暖光", cover: 6, tone: "#a08a9a" },
+  { slug: "sketch", label: "素描", category: "艺术风格", mood: "铅笔 / 草图", cover: 3, tone: "#7f7b74" },
+  { slug: "realistic", label: "写实", category: "艺术风格", mood: "自然光 / 细节", cover: 5, tone: "#6b6357" },
 ];
 
-const STYLE_COVERS: Record<string, {
-  bg: string;
-  image: string;
-  filter: string;
-  figure: string;
-  accent: string;
-  panel: string;
-  pattern: "spark" | "speed" | "soft" | "dots" | "ink" | "scroll" | "cinema" | "round" | "neon" | "poly" | "wash" | "dream" | "sketch" | "real";
-}> = {
-  anime: {
-    bg: "linear-gradient(135deg,#ffd6e9 0%,#8fc7ff 54%,#fff1a8 100%)",
-    image: "/style-covers/shot-2.png",
-    filter: "saturate(1.12) brightness(1.06)",
-    figure: "linear-gradient(160deg,#2f3a8f,#ff78b5)",
-    accent: "#ffffff",
-    panel: "rgba(255,255,255,.62)",
-    pattern: "spark",
-  },
-  shonen: {
-    bg: "linear-gradient(135deg,#ff3d3d 0%,#ffae00 48%,#201047 100%)",
-    image: "/style-covers/shot-2.png",
-    filter: "saturate(1.35) contrast(1.12) brightness(.95)",
-    figure: "linear-gradient(160deg,#171123,#ffef5a)",
-    accent: "#fff2a8",
-    panel: "rgba(255,255,255,.42)",
-    pattern: "speed",
-  },
-  "slice-of-life": {
-    bg: "linear-gradient(145deg,#fff0c7 0%,#bfe8d4 54%,#f6b6c8 100%)",
-    image: "/style-covers/shot-1.png",
-    filter: "saturate(.92) brightness(1.12)",
-    figure: "linear-gradient(160deg,#6b7bd8,#f59fbc)",
-    accent: "#fffef7",
-    panel: "rgba(255,255,255,.68)",
-    pattern: "soft",
-  },
-  manga: {
-    bg: "linear-gradient(135deg,#ffffff 0%,#e5e7eb 100%)",
-    image: "/style-covers/shot-3.png",
-    filter: "grayscale(1) contrast(1.28) brightness(1.08)",
-    figure: "linear-gradient(160deg,#111827,#4b5563)",
-    accent: "#111827",
-    panel: "rgba(255,255,255,.74)",
-    pattern: "dots",
-  },
-  donghua: {
-    bg: "linear-gradient(145deg,#d9f0e2 0%,#88b8a5 48%,#3c5f7d 100%)",
-    image: "/style-covers/shot-4.png",
-    filter: "saturate(.82) sepia(.18) brightness(1.02)",
-    figure: "linear-gradient(160deg,#213f47,#d9b36a)",
-    accent: "#f7f1dc",
-    panel: "rgba(255,255,255,.48)",
-    pattern: "ink",
-  },
-  "guofeng-manga": {
-    bg: "linear-gradient(135deg,#f6e0bf 0%,#b75b42 55%,#20233d 100%)",
-    image: "/style-covers/shot-4.png",
-    filter: "sepia(.32) saturate(.95) contrast(1.08)",
-    figure: "linear-gradient(160deg,#2a1f1d,#f2c572)",
-    accent: "#f7dfb8",
-    panel: "rgba(255,248,230,.48)",
-    pattern: "scroll",
-  },
-  cinematic: {
-    bg: "linear-gradient(135deg,#111827 0%,#64748b 45%,#f59e0b 100%)",
-    image: "/style-covers/shot-6.png",
-    filter: "contrast(1.14) brightness(.84) saturate(.88)",
-    figure: "linear-gradient(160deg,#050816,#d4af37)",
-    accent: "#f8d27a",
-    panel: "rgba(255,255,255,.32)",
-    pattern: "cinema",
-  },
-  pixar: {
-    bg: "linear-gradient(135deg,#ffd166 0%,#69dbff 48%,#8bd17c 100%)",
-    image: "/style-covers/shot-2.png",
-    filter: "saturate(1.22) brightness(1.08) contrast(.95)",
-    figure: "linear-gradient(160deg,#4f46e5,#ff8fab)",
-    accent: "#fff8d8",
-    panel: "rgba(255,255,255,.58)",
-    pattern: "round",
-  },
-  cyberpunk: {
-    bg: "linear-gradient(135deg,#090b1f 0%,#9333ea 46%,#06b6d4 100%)",
-    image: "/style-covers/shot-5.png",
-    filter: "saturate(1.45) contrast(1.18) brightness(.78) hue-rotate(34deg)",
-    figure: "linear-gradient(160deg,#111827,#22d3ee)",
-    accent: "#f0abfc",
-    panel: "rgba(255,255,255,.22)",
-    pattern: "neon",
-  },
-  lowpoly: {
-    bg: "linear-gradient(45deg,#94a3b8 0%,#f97316 45%,#22c55e 100%)",
-    image: "/style-covers/shot-3.png",
-    filter: "saturate(.9) contrast(1.05)",
-    figure: "linear-gradient(160deg,#1f2937,#fbbf24)",
-    accent: "#e2e8f0",
-    panel: "rgba(255,255,255,.42)",
-    pattern: "poly",
-  },
-  watercolor: {
-    bg: "linear-gradient(135deg,#fffaf0 0%,#dcefff 100%)",
-    image: "/style-covers/shot-1.png",
-    filter: "saturate(.78) brightness(1.16) contrast(.86)",
-    figure: "linear-gradient(160deg,#60a5fa,#fb7185)",
-    accent: "#ffffff",
-    panel: "rgba(255,255,255,.62)",
-    pattern: "wash",
-  },
-  "fairy-tale": {
-    bg: "linear-gradient(145deg,#ffe8a3 0%,#d8b4fe 50%,#9be7c7 100%)",
-    image: "/style-covers/shot-6.png",
-    filter: "saturate(1.08) brightness(1.1) hue-rotate(-10deg)",
-    figure: "linear-gradient(160deg,#7c3aed,#f9a8d4)",
-    accent: "#fff7c7",
-    panel: "rgba(255,255,255,.54)",
-    pattern: "dream",
-  },
-  sketch: {
-    bg: "linear-gradient(135deg,#f8fafc 0%,#cbd5e1 100%)",
-    image: "/style-covers/shot-3.png",
-    filter: "grayscale(1) contrast(1.45) brightness(1.16)",
-    figure: "linear-gradient(160deg,#334155,#0f172a)",
-    accent: "#475569",
-    panel: "rgba(255,255,255,.62)",
-    pattern: "sketch",
-  },
-  realistic: {
-    bg: "linear-gradient(135deg,#293241 0%,#8d99ae 42%,#e9c46a 100%)",
-    image: "/style-covers/shot-5.png",
-    filter: "saturate(.82) contrast(1.06) brightness(.96)",
-    figure: "linear-gradient(160deg,#111827,#d6a55d)",
-    accent: "#f5d99d",
-    panel: "rgba(255,255,255,.34)",
-    pattern: "real",
-  },
-};
+const PIPELINE = [
+  { step: "01", label: "故事大纲", icon: FileText, note: "提炼叙事骨架" },
+  { step: "02", label: "角色设定", icon: Users, note: "抽取人物并出形象" },
+  { step: "03", label: "分镜脚本", icon: Film, note: "拆解可拍摄镜头" },
+  { step: "04", label: "镜头视频", icon: ImageIcon, note: "首帧驱动逐镜生成" },
+  { step: "05", label: "合成输出", icon: Clapperboard, note: "拼接为完整成片" },
+];
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -183,6 +63,14 @@ export default function HomePage() {
   const [characterHints, setCharacterHints] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
+
+  /* A 类一次性入场：挂载时置运行态，动画结束后移除，DOM 回到纯静态 */
+  const [runAnim, setRunAnim] = useState(false);
+  useEffect(() => {
+    setRunAnim(true);
+    const timer = window.setTimeout(() => setRunAnim(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -206,49 +94,66 @@ export default function HomePage() {
   }, [story, createMutation]);
 
   const addCharacterHint = () => {
-    if (characterHints.length < 6) {
-      setCharacterHints([...characterHints, ""]);
-    }
+    if (characterHints.length < 6) setCharacterHints([...characterHints, ""]);
   };
-
   const updateCharacterHint = (index: number, value: string) => {
     const updated = [...characterHints];
     updated[index] = value;
     setCharacterHints(updated);
   };
-
   const removeCharacterHint = (index: number) => {
     setCharacterHints(characterHints.filter((_, i) => i !== index));
   };
 
-  // Group styles by category
   const categories = [...new Set(STYLES.map((s) => s.category))];
+  const currentStyle = STYLES.find((s) => s.slug === style);
 
   return (
-    <div className="min-h-screen bg-base-100">
+    <div className="min-h-screen bg-paper" data-run={runAnim ? "true" : "false"}>
+      {/* A 类氛围层：固定底层，不拦截事件 */}
+      <div className="atmosphere" aria-hidden="true">
+        <div className="aurora" />
+        <div className="paper-grid" />
+        <div className="grain" />
+      </div>
+
       <TopBar />
 
-      <main className="mx-auto w-full max-w-4xl px-4 py-6">
-        <section className="min-w-0">
-          <div className="mb-5">
-            <div>
-              <div className="mb-2 inline-flex items-center gap-2 rounded-md border border-primary/15 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary">
-                <Sparkles className="h-3.5 w-3.5" />
-                {BRAND.fullName}
-              </div>
-              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{BRAND.tagline}</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{BRAND.description}</p>
-            </div>
-          </div>
+      <main className="mx-auto w-full max-w-3xl px-5 pb-24 pt-14 sm:pt-20">
+        {/* 标题区 */}
+        <section className="mb-10">
+          <p className="eyebrow rise" style={{ ["--d" as string]: "0ms" }}>
+            {BRAND.name.toUpperCase()} · 漫剧生成工作台
+          </p>
+          <h1
+            className="display-serif mt-4 text-ink-1 rise"
+            style={{ ["--d" as string]: "70ms" }}
+          >
+            把一段故事，
+            <br />
+            拆成能看的镜头
+          </h1>
+          <p
+            className="mt-5 max-w-xl text-[14px] leading-[1.95] text-ink-2 rise"
+            style={{ ["--d" as string]: "150ms" }}
+          >
+            写下角色、冲突与收尾，系统会先拆大纲，再推进角色形象、分镜脚本、镜头视频，最后合成为一条成片。
+            每一步都留痕，可回看、可单点重生成。
+          </p>
+        </section>
 
-          <div className="card bg-base-100 shadow-brutal p-4 sm:p-5">
-          {/* Story textarea */}
+        {/* 主输入卡 */}
+        <section
+          className="card p-1.5 rise"
+          style={{ ["--d" as string]: "230ms" }}
+        >
           <div className="relative">
             <textarea
-              className="textarea textarea-bordered w-full resize-none text-base leading-7"
-              rows={8}
+              className="textarea w-full resize-none border-0 bg-transparent px-4 py-4 text-[14.5px] leading-[2] shadow-none focus:shadow-none"
+              style={{ boxShadow: "none" }}
+              rows={7}
               maxLength={5000}
-              placeholder="把这一幕交给弥镜：角色是谁，冲突在哪，镜头想怎么燃、怎么甜、怎么收尾。写下几句也可以，我会先拆成大纲，再把它推进成角色、分镜、镜头画面和成片。"
+              placeholder="把这一幕交给弥镜：角色是谁，冲突在哪，镜头想怎么收尾。写几句也行，我会先拆成大纲，再推进成角色、分镜与镜头视频。"
               value={story}
               onChange={(e) => setStory(e.target.value)}
               onCompositionStart={() => setIsComposing(true)}
@@ -259,120 +164,184 @@ export default function HomePage() {
                   handleSubmit();
                 }
               }}
+              aria-label="故事梗概输入"
             />
-            {/* Character counter */}
-            {story.length > 4500 && (
-              <span className="absolute bottom-2 left-3 text-xs bg-base-100/90 px-2 py-0.5 rounded-full">
-                {story.length}/5000
+            <div className="flex items-center justify-between gap-3 border-t border-line-soft px-3 py-2">
+              <span className="font-mono text-[11px] text-ink-4 tabular-nums">
+                {story.length} / 5000
               </span>
-            )}
-            {/* Submit button */}
-            <button
-              onClick={handleSubmit}
-              disabled={!story.trim() || createMutation.isPending}
-              className="absolute bottom-3 right-3 btn btn-primary rounded-md px-4 py-2 text-sm shadow-[0_12px_28px_rgba(37,99,235,.28)]"
-              aria-label="创建项目"
-            >
-              {createMutation.isPending ? (
-                <span className="loading loading-spinner loading-sm" />
-              ) : (
-                <>
-                  <span>生成漫剧</span>
-                  <ArrowUp className="h-4 w-4" />
-                </>
-              )}
-            </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!story.trim() || createMutation.isPending}
+                className="btn btn-primary rounded-md gap-1.5 px-4"
+                aria-label="开始生成漫剧"
+              >
+                {createMutation.isPending ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm" />
+                    <span>创建中</span>
+                  </>
+                ) : (
+                  <>
+                    <span>开始生成</span>
+                    <ArrowUp className="h-4 w-4" strokeWidth={1.8} />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {createMutation.isError && (
+          <div className="alert alert-error mt-3" role="alert">
+            <span>
+              创建失败：{(createMutation.error as Error)?.message || "请重试"}
+            </span>
+          </div>
+        )}
+
+        {/* 风格谱系 */}
+        <section
+          className="mt-10 rise"
+          style={{ ["--d" as string]: "310ms" }}
+        >
+          <div className="mb-4 flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-[15px] font-semibold text-ink-1">风格谱系</h2>
+              <p className="mt-1 text-[12.5px] leading-7 text-ink-3">
+                选一张封面作为基调，后续角色与镜头会沿用同一套画风约束。
+              </p>
+            </div>
+            <span className="shrink-0 rounded border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-2">
+              {currentStyle?.label}
+            </span>
           </div>
 
-          {/* Style selector */}
-          <div className="mt-5 rounded-lg border border-base-300 bg-base-200/40 p-3">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">风格谱系</p>
-                <p className="text-xs text-muted-foreground">选一张画风封面，后续角色和镜头会沿用这个基调。</p>
-              </div>
-              <span className="rounded-md bg-base-100 px-2 py-1 text-xs text-muted-foreground">{STYLES.find((s) => s.slug === style)?.label}</span>
-            </div>
-            <div className="space-y-4">
+          <div className="space-y-5">
             {categories.map((category) => (
               <div key={category}>
-                <p className="mb-2 px-1 text-xs font-medium text-muted-foreground">{category}</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                  {STYLES.filter((s) => s.category === category).map((s) => (
-                    <button
-                      key={s.slug}
-                      onClick={() => setStyle(s.slug)}
-                      className={cn(
-                        "group overflow-hidden rounded-md border bg-base-100 text-left transition-all",
-                        style === s.slug
-                          ? "border-primary shadow-[0_0_0_2px_rgba(37,99,235,.12),0_14px_28px_rgba(23,32,51,.12)]"
-                          : "border-base-300 hover:border-primary/40 hover:shadow-md",
-                      )}
-                    >
-                      <StyleCover slug={s.slug} active={style === s.slug} />
-                      <span className="block p-2">
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-semibold">{s.label}</span>
-                          <span className={cn(
-                            "h-2 w-2 rounded-full",
-                            style === s.slug ? "bg-primary" : "bg-base-300 group-hover:bg-primary/50",
-                          )} />
+                <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-4">
+                  {category}
+                </p>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  {STYLES.filter((s) => s.category === category).map((s) => {
+                    const active = style === s.slug;
+                    return (
+                      <button
+                        key={s.slug}
+                        onClick={() => setStyle(s.slug)}
+                        aria-pressed={active}
+                        className={cn(
+                          "group relative overflow-hidden rounded-md bg-surface text-left transition-[box-shadow,transform] duration-150",
+                          active
+                            ? "shadow-[inset_0_0_0_1.5px_var(--color-primary),0_6px_18px_-14px_rgba(25,25,23,.5)]"
+                            : "shadow-[inset_0_0_0_1px_var(--color-line)] hover:shadow-[inset_0_0_0_1px_var(--color-ink-4)]",
+                        )}
+                      >
+                        <span className="relative block h-[68px] w-full overflow-hidden bg-base-200">
+                          <img
+                            src={`/style-covers/shot-${s.cover}.png`}
+                            alt=""
+                            loading="lazy"
+                            className="h-full w-full object-cover"
+                            style={{
+                              filter: active
+                                ? "saturate(.72) contrast(1.02)"
+                                : "saturate(.5) contrast(1) brightness(1.01)",
+                              transition: "filter .15s ease",
+                            }}
+                          />
+                          {/* 代表色点：极小面积，不构成装饰 */}
+                          <span
+                            className="absolute left-2 top-2 h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: s.tone }}
+                            aria-hidden="true"
+                          />
                         </span>
-                        <span className="mt-1 block text-[11px] text-muted-foreground">{s.mood}</span>
-                      </span>
-                    </button>
-                  ))}
+                        <span className="flex items-center justify-between gap-2 px-2.5 py-2">
+                          <span className="min-w-0">
+                            <span className="block truncate text-[12.5px] font-medium text-ink-1">
+                              {s.label}
+                            </span>
+                            <span className="mt-0.5 block truncate text-[11px] text-ink-3">
+                              {s.mood}
+                            </span>
+                          </span>
+                          {active && (
+                            <span className="shrink-0 font-mono text-[10px] text-primary">
+                              已选
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ))}
-            </div>
           </div>
+        </section>
 
-          {/* Advanced options toggle */}
+        {/* 更多选项 */}
+        <section className="mt-8">
           <button
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="mt-4 flex items-center gap-2 text-sm text-muted-foreground hover:text-base-content transition-colors"
+            aria-expanded={showAdvanced}
+            className="flex items-center gap-2 text-[12.5px] text-ink-3 transition-colors duration-150 hover:text-ink-1"
           >
-            <SlidersHorizontal className="h-4 w-4" />
+            <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={1.7} />
             更多选项
-            <ChevronDown className={cn("h-4 w-4 transition-transform", showAdvanced && "rotate-180")} />
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 transition-transform duration-200",
+                showAdvanced && "rotate-180",
+              )}
+              strokeWidth={1.7}
+            />
           </button>
 
           {showAdvanced && (
-            <div className="mt-3 space-y-4 p-4 bg-base-100 rounded-xl border border-base-300">
-              {/* Shot count */}
+            <div className="card-flat mt-3 space-y-5 p-4">
               <div>
-                <label className="text-sm font-medium mb-1 block">
-                  分镜数量: <span className="text-primary font-bold">{shotCount || "默认"}</span>
+                <label
+                  htmlFor="shot-count"
+                  className="mb-2 flex items-baseline justify-between text-[12.5px] text-ink-2"
+                >
+                  <span>分镜数量</span>
+                  <span className="font-mono text-[12px] text-primary tabular-nums">
+                    {shotCount || "默认"}
+                  </span>
                 </label>
                 <input
+                  id="shot-count"
                   type="range"
                   min={1}
                   max={20}
                   value={shotCount}
                   onChange={(e) => setShotCount(Number(e.target.value))}
-                  className="range range-primary range-sm w-full"
+                  className="range range-primary w-full"
                 />
               </div>
 
-              {/* Character hints */}
               <div>
-                <label className="text-sm font-medium mb-2 block">角色提示</label>
+                <p className="mb-2 text-[12.5px] text-ink-2">角色提示</p>
                 <div className="space-y-2">
                   {characterHints.map((hint, i) => (
                     <div key={i} className="flex gap-2">
                       <input
                         type="text"
-                        className="input input-bordered input-sm flex-1"
+                        className="input input-sm flex-1"
                         placeholder={`角色 ${i + 1}`}
                         value={hint}
                         onChange={(e) => updateCharacterHint(i, e.target.value)}
+                        aria-label={`角色 ${i + 1} 提示`}
                       />
                       <button
                         onClick={() => removeCharacterHint(i)}
-                        className="btn btn-ghost btn-xs text-error"
+                        className="btn btn-ghost btn-xs btn-circle text-ink-3 hover:text-error"
+                        aria-label={`移除角色 ${i + 1}`}
                       >
-                        <X className="h-4 w-4" />
+                        <X className="h-3.5 w-3.5" strokeWidth={1.8} />
                       </button>
                     </div>
                   ))}
@@ -380,118 +349,45 @@ export default function HomePage() {
                 {characterHints.length < 6 && (
                   <button
                     onClick={addCharacterHint}
-                    className="btn btn-ghost btn-xs mt-2"
+                    className="btn btn-ghost btn-xs mt-2 gap-1 text-ink-3"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" strokeWidth={1.8} />
                     添加角色提示
                   </button>
                 )}
               </div>
             </div>
           )}
+        </section>
 
-          {/* Error message */}
-          {createMutation.isError && (
-            <div className="alert alert-error mt-4">
-              <span>创建失败: {(createMutation.error as Error)?.message || "请重试"}</span>
-            </div>
-          )}
-          </div>
+        {/* 流程说明：用真实阶段名替代装饰性口号 */}
+        <section className="mt-14 border-t border-line-soft pt-8">
+          <h2 className="mb-5 text-[13px] font-semibold text-ink-2">
+            一条内容要经过的五道工序
+          </h2>
+          <ol className="grid grid-cols-1 gap-px overflow-hidden rounded-md bg-line sm:grid-cols-5">
+            {PIPELINE.map((item) => {
+              const Icon = item.icon;
+              return (
+                <li key={item.step} className="bg-surface px-3.5 py-4">
+                  <div className="flex items-center justify-between">
+                    <Icon className="h-4 w-4 text-ink-3" strokeWidth={1.6} />
+                    <span className="font-mono text-[10.5px] text-ink-4 tabular-nums">
+                      {item.step}
+                    </span>
+                  </div>
+                  <p className="mt-2.5 text-[12.5px] font-medium text-ink-1">
+                    {item.label}
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-6 text-ink-3">
+                    {item.note}
+                  </p>
+                </li>
+              );
+            })}
+          </ol>
         </section>
       </main>
     </div>
   );
-}
-
-function StyleCover({ slug, active }: { slug: string; active: boolean }) {
-  const cover = STYLE_COVERS[slug] || STYLE_COVERS.anime;
-
-  return (
-    <span
-      className="relative block h-24 w-full overflow-hidden border-b border-base-300"
-      style={{ background: cover.bg }}
-    >
-      <span
-        className="absolute inset-0 bg-cover bg-center"
-        style={{
-          backgroundImage: `url(${cover.image})`,
-          filter: cover.filter,
-          transform: "scale(1.04)",
-        }}
-      />
-      <span
-        className="absolute inset-0 mix-blend-multiply opacity-45"
-        style={{ background: cover.bg }}
-      />
-      <span className="absolute inset-0 opacity-65" style={patternStyle(cover.pattern, cover.accent)} />
-      <span className="absolute inset-x-0 bottom-0 h-9 bg-gradient-to-t from-black/58 to-transparent" />
-      <span className="absolute left-2 top-2 h-[calc(100%-16px)] w-[calc(100%-16px)] rounded-sm border border-white/42 shadow-[inset_0_0_0_1px_rgba(0,0,0,.12)]" />
-      <span className="absolute left-3 top-3 h-4 w-9 rounded-full border border-black/10 bg-white/76" />
-      <span className="absolute left-6 top-[24px] h-2 w-2 rotate-45 bg-white/76" />
-      <span className="absolute bottom-2 left-3 h-4 w-16 rounded-sm bg-black/46" />
-      <span className="absolute bottom-[15px] left-5 h-0.5 w-9 bg-white/72" />
-      <span className="absolute bottom-[10px] left-5 h-0.5 w-6 bg-white/58" />
-      <span className="absolute right-2 top-2 rounded-full bg-black/46 px-2 py-0.5 text-[10px] text-white shadow-sm">
-        {active ? "当前" : "预览"}
-      </span>
-    </span>
-  );
-}
-
-function patternStyle(pattern: string, accent: string): React.CSSProperties {
-  if (pattern === "speed") {
-    return {
-      background: `repeating-linear-gradient(115deg, rgba(255,255,255,.35) 0 4px, transparent 4px 13px), radial-gradient(circle at 25% 78%, ${accent} 0 3px, transparent 4px)`,
-    };
-  }
-  if (pattern === "dots") {
-    return {
-      background: "radial-gradient(circle, rgba(15,23,42,.32) 1px, transparent 1.8px)",
-      backgroundSize: "9px 9px",
-    };
-  }
-  if (pattern === "ink" || pattern === "wash") {
-    return {
-      background: `radial-gradient(ellipse at 30% 35%, ${accent}99 0 18%, transparent 19%), radial-gradient(ellipse at 68% 58%, rgba(255,255,255,.35) 0 16%, transparent 17%)`,
-      filter: "blur(.2px)",
-    };
-  }
-  if (pattern === "scroll") {
-    return {
-      background: "repeating-linear-gradient(90deg, rgba(91,51,26,.22) 0 1px, transparent 1px 12px)",
-    };
-  }
-  if (pattern === "cinema") {
-    return {
-      background: "linear-gradient(0deg, rgba(0,0,0,.45) 0 14%, transparent 15% 82%, rgba(0,0,0,.45) 83% 100%)",
-    };
-  }
-  if (pattern === "neon") {
-    return {
-      background: `repeating-linear-gradient(0deg, rgba(255,255,255,.1) 0 1px, transparent 1px 8px), linear-gradient(90deg, transparent, ${accent}66, transparent)`,
-    };
-  }
-  if (pattern === "poly") {
-    return {
-      background: "linear-gradient(135deg, transparent 0 44%, rgba(255,255,255,.28) 45% 55%, transparent 56%), linear-gradient(45deg, transparent 0 54%, rgba(0,0,0,.12) 55% 62%, transparent 63%)",
-    };
-  }
-  if (pattern === "sketch") {
-    return {
-      background: "repeating-linear-gradient(145deg, rgba(15,23,42,.24) 0 1px, transparent 1px 7px)",
-    };
-  }
-  if (pattern === "dream" || pattern === "spark") {
-    return {
-      background: `radial-gradient(circle at 72% 24%, rgba(255,255,255,.92) 0 8%, transparent 9%), radial-gradient(circle at 22% 62%, ${accent}aa 0 5%, transparent 6%)`,
-    };
-  }
-  if (pattern === "round" || pattern === "soft") {
-    return {
-      background: "radial-gradient(circle at 35% 30%, rgba(255,255,255,.84) 0 12%, transparent 13%), radial-gradient(circle at 72% 64%, rgba(255,255,255,.36) 0 16%, transparent 17%)",
-    };
-  }
-  return {
-    background: `radial-gradient(circle at 68% 20%, ${accent}aa 0 9%, transparent 10%), linear-gradient(0deg, rgba(255,255,255,.18), transparent)`,
-  };
 }

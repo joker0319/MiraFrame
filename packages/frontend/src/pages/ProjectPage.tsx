@@ -221,9 +221,9 @@ export default function ProjectPage() {
   useEffect(() => () => { clearProject(); clearCharacters(); clearShots(); clearMessages(); }, []);
 
   // ---- Render states ----
-  if (!projectId) return <div className="min-h-screen flex items-center justify-center">无效的项目 ID</div>;
-  if (projectQuery.isLoading) return <div className="min-h-screen flex flex-col items-center justify-center gap-3"><span className="loading loading-spinner loading-lg" /><p className="text-muted-foreground">正在加载项目...</p></div>;
-  if (projectQuery.isError || !projectQuery.data) return <div className="min-h-screen flex flex-col items-center justify-center gap-4"><p className="text-lg font-medium">项目未找到</p><button onClick={() => navigate("/")} className="btn btn-primary">返回首页</button></div>;
+  if (!projectId) return <div className="min-h-screen flex items-center justify-center bg-paper text-ink-2">无效的项目 ID</div>;
+  if (projectQuery.isLoading) return <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-paper"><span className="loading loading-spinner loading-lg" /><p className="text-[12.5px] text-ink-3">正在读取项目</p></div>;
+  if (projectQuery.isError || !projectQuery.data) return <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-paper"><p className="font-serif text-[17px] text-ink-1">项目未找到</p><button onClick={() => navigate("/")} className="btn btn-primary">返回首页</button></div>;
 
   const hasRecovery = recoveryControl?.state === "recoverable";
   const latestRunError = runError || latestRunQuery.data?.error || null;
@@ -241,7 +241,7 @@ export default function ProjectPage() {
   });
 
   return (
-    <div className="h-screen flex flex-col bg-base-100">
+    <div className="h-screen flex flex-col bg-paper">
       <TopBar />
       <StagePipeline currentStage={currentStage} isGenerating={isGenerating} awaitingConfirm={awaitingConfirm} hasRecovery={hasRecovery} onResume={() => {}} onCancel={handleCancel} stages={topStages} />
       <div className="flex flex-1 overflow-hidden">
@@ -392,12 +392,12 @@ function CanvasArea({
   if (!selectedNode) return null;
 
   return (
-    <div className="flex-1 overflow-hidden bg-background">
+    <div className="flex-1 overflow-hidden bg-paper">
       <div className="h-full flex flex-col">
-        <div className="min-h-14 shrink-0 border-b border-base-300 bg-base-100 px-4 py-2 flex items-center justify-between gap-3">
+        <div className="min-h-14 shrink-0 border-b border-line bg-paper px-4 py-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-semibold truncate">{projectTitle || BRAND.fullName}</p>
-            <p className="text-xs text-muted-foreground">{BRAND.cnName} 项目工作台</p>
+            <p className="text-[13.5px] font-medium truncate text-ink-1">{projectTitle || BRAND.fullName}</p>
+            <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">{BRAND.cnName} · 工作台</p>
           </div>
           <div className="flex items-center gap-2">
             {(awaitingConfirm || needsOutlineApproval) && (
@@ -421,11 +421,18 @@ function CanvasArea({
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(320px,0.9fr)_minmax(360px,1.1fr)] xl:grid-cols-[minmax(620px,1fr)_520px] xl:grid-rows-1 overflow-hidden">
-          <div className="relative overflow-auto halftone-bg">
-            <div className="relative min-h-[620px] min-w-[720px] p-8">
-              <WorkflowConnectors />
-              <div className="grid grid-cols-2 gap-x-12 gap-y-8 relative z-10 max-w-[720px]">
+        <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(320px,0.9fr)_minmax(360px,1.1fr)] xl:grid-cols-[minmax(560px,1fr)_500px] xl:grid-rows-1 overflow-hidden">
+          <div className="relative overflow-auto">
+            <div className="p-5">
+              <div className="mb-3 flex items-baseline justify-between">
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4">
+                  制作流程 · 5 阶段
+                </p>
+                <p className="font-mono text-[10px] text-ink-4 tabular-nums">
+                  {nodes.filter((n) => n.status === "done").length} / {nodes.length} 完成
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 {nodes.map((node, index) => (
                   <WorkflowNodeCard
                     ref={(element) => { nodeRefs.current[node.id] = element; }}
@@ -440,7 +447,7 @@ function CanvasArea({
             </div>
           </div>
 
-          <aside className="border-t xl:border-t-0 xl:border-l border-base-300 bg-base-100 overflow-y-auto">
+          <aside className="border-t xl:border-t-0 xl:border-l border-line bg-surface overflow-y-auto">
             <NodeDetail
               selectedNode={selectedNode}
               outline={outlineRecord}
@@ -478,55 +485,47 @@ const WorkflowNodeCard = forwardRef<HTMLButtonElement, {
   onSelect,
 }, ref) {
   const Icon = node.icon;
-  const shouldOffset = index % 2 === 1;
+
+  const iconTone =
+    node.status === "done"
+      ? "bg-success-tint text-success"
+      : node.status === "active"
+        ? "bg-warning-tint text-warning"
+        : node.status === "review"
+          ? "bg-primary/10 text-primary"
+          : node.status === "error"
+            ? "bg-error-tint text-error"
+            : "bg-base-200 text-ink-3";
 
   return (
     <button
       ref={ref}
       onClick={onSelect}
+      aria-pressed={selected}
       className={cn(
-        "min-h-[156px] text-left rounded-lg border bg-base-100 p-4 transition-all relative shadow-sm",
-        shouldOffset && "translate-y-6",
-        selected ? "border-primary shadow-[0_0_0_3px_rgba(59,130,246,0.12),0_16px_34px_rgba(15,23,42,0.08)]" : "border-base-300 hover:border-primary/40 hover:shadow-md",
-        node.status === "active" && "ring-2 ring-warning/30",
-        node.status === "review" && "ring-2 ring-primary/30",
-        node.status === "error" && "ring-2 ring-error/30",
+        "group relative min-h-[142px] text-left rounded-md bg-surface p-3.5 transition-[box-shadow] duration-150",
+        selected
+          ? "shadow-[inset_0_0_0_1.5px_var(--color-primary),0_10px_24px_-20px_rgba(25,25,23,.55)]"
+          : "shadow-[inset_0_0_0_1px_var(--color-line)] hover:shadow-[inset_0_0_0_1px_var(--color-ink-4)]",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className={cn(
-          "h-9 w-9 rounded-lg flex items-center justify-center",
-          node.status === "done" && "bg-success/10 text-success",
-          node.status === "active" && "bg-warning/10 text-warning",
-          node.status === "review" && "bg-primary/10 text-primary",
-          node.status === "error" && "bg-error/10 text-error",
-          node.status === "pending" && "bg-base-200 text-muted-foreground",
-        )}>
-          <Icon className="h-4.5 w-4.5" />
+      <div className="flex items-start justify-between gap-2">
+        <span className={cn("flex h-8 w-8 items-center justify-center rounded", iconTone)}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <span className="font-mono text-[10px] text-ink-4 tabular-nums">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+      </div>
+      <div className="mt-3">
+        <div className="flex items-center gap-2">
+          <p className="text-[13px] font-medium text-ink-1">{node.label}</p>
+          <WorkflowStatusBadge status={node.status} />
         </div>
-        <WorkflowStatusBadge status={node.status} />
+        <p className="mt-1 text-[11.5px] leading-6 text-ink-3 line-clamp-2">{node.description}</p>
       </div>
-      <div className="mt-4 pr-1">
-        <p className="text-sm font-semibold">{node.label}</p>
-        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{node.description}</p>
-      </div>
-      <div className="mt-4 text-xs font-medium text-base-content">{node.metric}</div>
+      <p className="mt-2.5 font-mono text-[11px] text-ink-2 tabular-nums">{node.metric}</p>
     </button>
   );
 });
 
-function WorkflowConnectors() {
-  return (
-    <svg className="absolute inset-0 h-full w-full pointer-events-none z-0" aria-hidden="true">
-      <defs>
-        <marker id="workflow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-          <path d="M0,0 L8,4 L0,8 Z" fill="#cbd5e1" />
-        </marker>
-      </defs>
-      <path d="M270 108 C350 108, 350 128, 430 128" stroke="#cbd5e1" strokeWidth="2" fill="none" markerEnd="url(#workflow-arrow)" />
-      <path d="M430 250 C350 300, 350 300, 270 350" stroke="#cbd5e1" strokeWidth="2" fill="none" markerEnd="url(#workflow-arrow)" />
-      <path d="M270 350 C350 350, 350 370, 430 370" stroke="#cbd5e1" strokeWidth="2" fill="none" markerEnd="url(#workflow-arrow)" />
-      <path d="M430 490 C350 545, 270 545, 190 555" stroke="#cbd5e1" strokeWidth="2" fill="none" markerEnd="url(#workflow-arrow)" />
-    </svg>
-  );
-}

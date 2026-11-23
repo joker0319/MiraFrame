@@ -38,26 +38,26 @@ export function ChatDrawer(props: ChatDrawerProps) {
   if (!isOpen) {
     // Render a minimized toggle tab
     return (
-      <div className="flex flex-col w-8 bg-base-100 border-l border-base-300">
+      <div className="flex w-8 flex-col border-l border-line bg-base-100">
         <button
           onClick={open}
-          className="flex-1 flex items-center justify-center hover:bg-base-200 transition-colors"
+          className="flex flex-1 items-center justify-center transition-colors duration-150 hover:bg-base-200"
           title="打开生成日志"
         >
-          <span className="text-xs [writing-mode:vertical-rl]">日志</span>
+          <span className="text-[11px] text-ink-3 [writing-mode:vertical-rl]">日志</span>
         </button>
         {awaitingConfirm && (
-          <span className="w-2 h-2 rounded-full bg-warning animate-pulse mx-auto mb-1" />
+          <span className="mx-auto mb-1 h-2 w-2 animate-pulse rounded-full bg-warning" />
         )}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col w-[360px] bg-base-100 border-l border-base-300">
+    <div className="flex w-[360px] flex-col border-l border-line bg-base-100">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-base-200">
-        <span className="text-xs font-medium text-muted-foreground">生成日志</span>
+      <div className="flex items-center justify-between border-b border-line-soft px-3 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4">生成日志</span>
         <button
           onClick={close}
           className="btn btn-xs btn-circle btn-ghost"

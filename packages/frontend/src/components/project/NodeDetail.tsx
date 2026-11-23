@@ -79,14 +79,16 @@ export function NodeDetail({
 
   return (
     <div className="h-full p-5">
-      <div className="flex items-start justify-between gap-3 border-b border-base-200 pb-4">
-        <div>
+      <div className="flex items-start justify-between gap-3 border-b border-line-soft pb-4">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <p className="text-base font-semibold">{selectedNode.label}</p>
+            <p className="text-[14px] font-medium text-ink-1">{selectedNode.label}</p>
             <WorkflowStatusBadge status={selectedNode.status} />
           </div>
-          <p className="text-sm text-muted-foreground mt-1">{selectedNode.description}</p>
-          <p className="text-xs font-medium mt-2">{selectedNode.metric}</p>
+          <p className="mt-1.5 text-[12.5px] leading-6 text-ink-3">{selectedNode.description}</p>
+          <p className="mt-2 font-mono text-[10.5px] text-ink-4 tabular-nums">
+            {selectedNode.metric}
+          </p>
         </div>
         {selectedNode.id === "outline" && (awaitingOutline || needsOutlineApproval) && (
           <button onClick={() => onConfirm()} className="btn btn-primary btn-sm gap-1 shrink-0">
@@ -115,18 +117,20 @@ export function NodeDetail({
       </div>
 
       {showMaterialIssue && (
-        <div className="mt-4 rounded-lg border border-error/30 bg-error/5 p-3">
+        <div className="mt-4 rounded-[6px] bg-error-tint p-3 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-error)_22%,transparent)]">
           <div className="flex items-start gap-2">
-            <TriangleAlert className="h-4 w-4 text-error mt-0.5 shrink-0" />
+            <TriangleAlert className="h-4 w-4 text-error mt-0.5 shrink-0" strokeWidth={1.8} />
             <div className="min-w-0">
-              <p className="text-sm font-medium text-error">生成未完成</p>
-              <p className="text-xs text-base-content/80 mt-1">
+              <p className="text-[12.5px] font-medium text-error">生成未完成</p>
+              <p className="mt-1 text-[12px] leading-6 text-ink-2">
                 {selectedNode.id === "characters" && !latestRunError
                   ? `还有 ${missingCharacterImages.length} 个角色缺少角色图，可以重新生成缺失图片。`
                   : formatRunError(latestRunError)}
               </p>
               {taskVideoCount > 0 && (
-                <p className="text-xs text-base-content/70 mt-1">检测到 {taskVideoCount} 条视频仍是任务地址，尚不是可播放视频。</p>
+                <p className="mt-1 text-[12px] leading-6 text-ink-3">
+                  检测到 {taskVideoCount} 条视频仍是任务地址，尚不是可播放视频。
+                </p>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
                 {selectedNode.id === "characters" ? (
@@ -234,7 +238,7 @@ function CharacterNodeDetail({
   return (
     <div className="space-y-3">
       {characters.map((character) => (
-        <div key={character.id} className="rounded-lg border border-base-200 bg-base-100 p-3">
+        <div key={character.id} className="rounded-[6px] bg-base-100 p-3 shadow-[inset_0_0_0_1px_var(--color-line-soft)]">
           <div className="grid grid-cols-[148px_1fr] gap-3">
             <MediaTile
               title={character.name}
@@ -245,10 +249,10 @@ function CharacterNodeDetail({
               onOpen={onOpen}
             />
             <div className="min-w-0">
-              <p className="text-sm font-semibold">{character.name}</p>
+              <p className="font-serif text-[14px] font-medium text-ink-1">{character.name}</p>
               {!character.image_url && (
-                <div className="mt-2 rounded-md border border-error/25 bg-error/5 p-2">
-                  <p className="text-xs text-error">
+                <div className="mt-2 rounded-[5px] bg-error-tint p-2 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-error)_20%,transparent)]">
+                  <p className="text-[11.5px] leading-5 text-error">
                     {latestRunError ? formatRunError(latestRunError) : "这个角色还没有生成角色图。"}
                   </p>
                   <button
@@ -260,20 +264,22 @@ function CharacterNodeDetail({
                       feedback_type: "regenerate_image",
                     })}
                     disabled={isSubmittingRevision}
-                    className="btn btn-outline btn-error btn-xs mt-2 gap-1"
+                    className="btn btn-error btn-xs mt-2 gap-1"
                   >
-                    <RefreshCw className="h-3.5 w-3.5" />
+                    <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
                     重生成角色图
                   </button>
                 </div>
               )}
-              <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed mt-2">
+              <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-ink-3">
                 {character.description || "暂无角色介绍"}
               </p>
               {character.visual_notes && (
-                <div className="mt-3 rounded-md bg-base-200/70 p-2">
-                  <p className="text-[11px] font-medium text-muted-foreground mb-1">视觉设定</p>
-                  <p className="text-xs whitespace-pre-wrap leading-relaxed">{character.visual_notes}</p>
+                <div className="mt-3 rounded-[5px] bg-base-200 p-2">
+                  <p className="eyebrow mb-1">视觉设定</p>
+                  <p className="whitespace-pre-wrap text-[11.5px] leading-5 text-ink-2">
+                    {character.visual_notes}
+                  </p>
                 </div>
               )}
             </div>
@@ -290,13 +296,19 @@ function ShotNodeDetail({ shots }: { shots: Shot[] }) {
   return (
     <div className="space-y-3">
       {shots.map((shot) => (
-        <div key={shot.id} className="rounded-lg border border-base-200 bg-base-100 p-3">
+        <div key={shot.id} className="rounded-[6px] bg-base-100 p-3 shadow-[inset_0_0_0_1px_var(--color-line-soft)]">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-muted-foreground">镜头 {shot.order}</p>
-            <span className="text-[11px] text-muted-foreground">{shot.duration ? `${shot.duration}s` : ""}</span>
+            <p className="font-mono text-[10.5px] text-ink-4 tabular-nums">
+              镜头 {String(shot.order).padStart(2, "0")}
+            </p>
+            <span className="font-mono text-[10.5px] text-ink-4 tabular-nums">
+              {shot.duration ? `${shot.duration}s` : ""}
+            </span>
           </div>
-          <p className="text-sm whitespace-pre-wrap leading-relaxed mt-2">{shot.description || shot.prompt || "暂无镜头描述"}</p>
-          <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+          <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-6 text-ink-2">
+            {shot.description || shot.prompt || "暂无镜头描述"}
+          </p>
+          <dl className="mt-3 grid grid-cols-2 gap-2 text-[11.5px]">
             {shot.scene && <ShotMeta label="场景" value={shot.scene} />}
             {shot.camera && <ShotMeta label="镜头" value={shot.camera} />}
             {shot.action && <ShotMeta label="动作" value={shot.action} />}
@@ -305,9 +317,11 @@ function ShotNodeDetail({ shots }: { shots: Shot[] }) {
             {shot.dialogue && <ShotMeta label="台词" value={shot.dialogue} />}
           </dl>
           {shot.image_prompt && (
-            <div className="mt-3 rounded-md bg-base-200/70 p-2">
-              <p className="text-[11px] font-medium text-muted-foreground mb-1">图像提示词</p>
-              <p className="text-xs whitespace-pre-wrap leading-relaxed">{shot.image_prompt}</p>
+            <div className="mt-3 rounded-[5px] bg-base-200 p-2">
+              <p className="eyebrow mb-1">图像提示词</p>
+              <p className="whitespace-pre-wrap text-[11.5px] leading-5 text-ink-2">
+                {shot.image_prompt}
+              </p>
             </div>
           )}
         </div>
@@ -328,14 +342,14 @@ function OutputNodeDetail({
   onOpen: (preview: MediaPreview) => void;
 }) {
   return (
-    <div className="rounded-lg border border-base-200 bg-base-100 p-4 text-sm">
+    <div className="rounded-[6px] bg-base-100 p-4 shadow-[inset_0_0_0_1px_var(--color-line-soft)]">
       {projectVideoUrl && !isInternalCompositionUrl(projectVideoUrl) ? (
         <div className="space-y-3">
           {isFinalVideoUrl(projectVideoUrl) ? (
             <button
               type="button"
               onClick={() => onOpen({ title: "合成输出", url: projectVideoUrl, kind: "video" })}
-              className="group w-full rounded-lg border border-base-200 bg-black overflow-hidden relative"
+              className="group w-full rounded-lg border border-line-soft bg-black overflow-hidden relative"
             >
               <video src={projectVideoUrl} className="w-full max-h-[320px] bg-black object-contain" controls />
               <span className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100">
@@ -356,16 +370,16 @@ function OutputNodeDetail({
             )}
           </div>
           {!isFinalVideoUrl(projectVideoUrl) && (
-            <p className="text-xs text-muted-foreground">当前是按镜头顺序连续播放的合成预览，还不是单个 mp4 成片。</p>
+            <p className="text-xs text-ink-3">当前是按镜头顺序连续播放的合成预览，还不是单个 mp4 成片。</p>
           )}
         </div>
       ) : (
         <div className="space-y-2">
-          <p className="text-muted-foreground">等待全部镜头视频完成后输出。</p>
+          <p className="text-ink-3">等待全部镜头视频完成后输出。</p>
           {isInternalCompositionUrl(projectVideoUrl) && (
             <p className="text-xs text-error">检测到旧版内部合成地址，需要重新执行合成输出。</p>
           )}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-ink-3">
             <Info className="h-4 w-4" />
             当前可播放镜头 {playableVideoCount}/{shotCount || 0}
           </div>
@@ -399,18 +413,18 @@ function RevisionPanel({
   };
 
   return (
-    <div className="mt-5 rounded-lg border border-primary/20 bg-primary/5 p-3">
+    <div className="mt-5 rounded-[6px] bg-base-100 p-3 shadow-[inset_0_0_0_1px_var(--color-line-soft)]">
       <div className="flex items-start gap-2">
-        <span className="h-8 w-8 shrink-0 rounded-md bg-base-100 text-primary flex items-center justify-center">
-          <Sparkles className="h-4 w-4" />
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] bg-base-200 text-primary">
+          <Sparkles className="h-3.5 w-3.5" strokeWidth={1.7} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold">提交{selectedNode.label}修改</p>
-          <p className="text-xs text-muted-foreground mt-1">{target.helper}</p>
+          <p className="text-[12.5px] font-medium text-ink-1">提交{selectedNode.label}修改</p>
+          <p className="mt-1 text-[11.5px] leading-5 text-ink-3">{target.helper}</p>
         </div>
       </div>
       <textarea
-        className="textarea textarea-bordered w-full mt-3 text-sm"
+        className="textarea mt-3 w-full"
         rows={3}
         value={content}
         onChange={(event) => setContent(event.target.value)}
@@ -433,14 +447,18 @@ function RevisionPanel({
 }
 
 function EmptyNodeContent({ text }: { text: string }) {
-  return <p className="col-span-3 rounded-md border border-dashed border-base-300 p-4 text-center text-xs text-muted-foreground">{text}</p>;
+  return (
+    <p className="col-span-3 rounded-[6px] border border-dashed border-line py-8 text-center text-[12.5px] text-ink-3">
+      {text}
+    </p>
+  );
 }
 
 function ShotMeta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-base-200/70 p-2">
-      <dt className="text-[11px] font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-1 whitespace-pre-wrap leading-relaxed">{value}</dd>
+    <div className="rounded-[5px] bg-base-200 p-2">
+      <dt className="eyebrow">{label}</dt>
+      <dd className="mt-1 whitespace-pre-wrap leading-6 text-ink-2">{value}</dd>
     </div>
   );
 }
@@ -471,7 +489,7 @@ function MediaTile({
 }) {
   if (!url) {
     return (
-      <div className={cn("aspect-[4/3] w-full rounded-md border border-dashed bg-base-200 flex items-center justify-center text-xs text-muted-foreground", issue && "border-error/30 text-error")}>
+      <div className={cn("flex aspect-[4/3] w-full items-center justify-center rounded-[5px] border border-dashed bg-base-200 text-[11.5px] text-ink-3", issue && "border-[color-mix(in_srgb,var(--color-error)_30%,transparent)] text-error")}>
         {emptyText}
       </div>
     );
@@ -481,7 +499,7 @@ function MediaTile({
     <button
       type="button"
       onClick={() => onOpen({ title, url, kind, posterUrl })}
-      className={cn("group aspect-[4/3] w-full rounded-md border overflow-hidden bg-base-200 relative", issue ? "border-error/40" : "border-base-200")}
+      className={cn("group relative aspect-[4/3] w-full overflow-hidden rounded-[5px] border bg-base-200", issue ? "border-[color-mix(in_srgb,var(--color-error)_40%,transparent)]" : "border-line-soft")}
       title={`查看${title}`}
     >
       {kind === "video" ? (
@@ -533,7 +551,7 @@ function AssetStrip({
   return (
     <div className="grid grid-cols-2 gap-3">
       {visible.map((item) => (
-        <div key={item.id} className={cn("rounded-lg border overflow-hidden bg-base-100 p-2", item.issue ? "border-error/30" : "border-base-200")}>
+        <div key={item.id} className={cn("overflow-hidden rounded-[6px] bg-base-100 p-2 shadow-[inset_0_0_0_1px_var(--color-line-soft)]", item.issue && "shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-error)_28%,transparent)]")}>
           <MediaTile
             title={item.title}
             url={item.url}
@@ -543,9 +561,9 @@ function AssetStrip({
             issue={item.issue}
             onOpen={onOpen}
           />
-          <div className="px-2 py-2">
-            <p className="text-xs font-medium truncate">{item.title}</p>
-            {item.issue && <p className="text-[11px] text-error mt-1">{item.issue}</p>}
+          <div className="px-1.5 pb-1 pt-2">
+            <p className="truncate text-[12px] font-medium text-ink-1">{item.title}</p>
+            {item.issue && <p className="mt-1 text-[11px] text-error">{item.issue}</p>}
             {item.onAction && item.actionLabel && (
               <button
                 type="button"
@@ -553,7 +571,7 @@ function AssetStrip({
                 disabled={actionDisabled}
                 className="btn btn-outline btn-xs mt-2 w-full gap-1"
               >
-                <RefreshCw className="h-3.5 w-3.5" />
+                <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
                 {item.actionLabel}
               </button>
             )}
@@ -619,23 +637,25 @@ function OutlineCanvasPreview({
   const acts = getOutlineActs(outline);
 
   return (
-    <div className="rounded-lg border border-base-200 bg-base-100 p-4">
-      {title && <p className="text-base font-semibold">{title}</p>}
-      {logline && <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">{logline}</p>}
+    <div className="rounded-[6px] bg-base-100 p-4 shadow-[inset_0_0_0_1px_var(--color-line-soft)]">
+      {title && <p className="font-serif text-[16px] font-medium text-ink-1">{title}</p>}
+      {logline && (
+        <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-6 text-ink-3">{logline}</p>
+      )}
       {acts.length > 0 && (
         <div className="mt-4 space-y-2">
           {acts.map((act, index) => (
-            <div key={`${act}-${index}`} className="rounded-md bg-base-200/70 p-3">
-              <p className="text-xs font-medium text-muted-foreground">剧情段落 {index + 1}</p>
-              <p className="text-sm mt-1 whitespace-pre-wrap leading-relaxed">{act}</p>
+            <div key={`${act}-${index}`} className="rounded-[5px] bg-base-200 p-3">
+              <p className="eyebrow">剧情段落 {String(index + 1).padStart(2, "0")}</p>
+              <p className="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-6 text-ink-2">{act}</p>
             </div>
           ))}
         </div>
       )}
       {visualBible && (
-        <div className="mt-4 rounded-md border border-base-200 p-3">
-          <p className="text-xs font-medium text-muted-foreground">视觉风格</p>
-          <p className="text-sm mt-1 whitespace-pre-wrap leading-relaxed">{visualBible}</p>
+        <div className="mt-4 rounded-[5px] p-3 shadow-[inset_0_0_0_1px_var(--color-line-soft)]">
+          <p className="eyebrow">视觉风格</p>
+          <p className="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-6 text-ink-2">{visualBible}</p>
         </div>
       )}
     </div>

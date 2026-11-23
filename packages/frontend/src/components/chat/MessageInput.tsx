@@ -18,10 +18,10 @@ export function MessageInput({
   buttonLabel = "发送",
 }: MessageInputProps) {
   return (
-    <div className="flex gap-2 p-2 border-t border-base-300">
+    <div className="flex gap-2 border-t border-line-soft p-2">
       <input
         type="text"
-        className="input input-bordered bg-base-300 flex-1"
+        className="input flex-1"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {

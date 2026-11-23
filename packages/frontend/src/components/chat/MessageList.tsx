@@ -128,20 +128,20 @@ export function MessageList({ messages }: MessageListProps) {
             ) : isCollapsed && msg.summary ? (
               <button
                 onClick={() => msg.id && toggleCollapse(msg.id)}
-                className="w-full text-left px-3 py-2 rounded-lg bg-base-200 hover:bg-base-300 text-sm transition-colors"
+                className="w-full rounded-[6px] bg-base-200 px-3 py-2 text-left text-[12.5px] leading-6 text-ink-2 transition-colors duration-150 hover:bg-base-300/70"
               >
                 <span className="line-clamp-1">{msg.summary}</span>
-                <span className="text-xs text-muted-foreground"> 点击展开</span>
+                <span className="text-[11px] text-ink-4"> 点击展开</span>
               </button>
             ) : (
               <div
                 className={cn(
-                  "px-3 py-2 rounded-lg text-sm",
+                  "rounded-[6px] px-3 py-2 text-[12.5px] leading-6",
                   msg.role === "error"
-                    ? "bg-error/10 text-error"
+                    ? "bg-error-tint text-error shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-error)_20%,transparent)]"
                     : msg.role === "user"
-                      ? "bg-primary/10 ml-8"
-                      : "bg-base-200",
+                      ? "ml-8 bg-primary/[0.055] text-ink-1 shadow-[inset_0_0_0_1px_rgba(140,29,47,0.12)]"
+                      : "bg-base-200 text-ink-2",
                 )}
               >
                 {/* Content */}
@@ -188,10 +188,10 @@ function ThinkingBubble({ msg }: { msg: AgentMessage }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="px-3 py-2 rounded-lg bg-base-200/50 text-xs">
+    <div className="rounded-[6px] bg-base-200 px-3 py-2 text-[11.5px]">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left text-muted-foreground hover:text-base-content"
+        className="flex w-full items-center gap-2 text-left text-ink-3 transition-colors duration-150 hover:text-ink-1"
       >
         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -285,21 +285,21 @@ function StructuredOutputCard({
 }) {
   const body = content.replace(title, "").trim();
   const accentClass = {
-    outline: "border-primary/30 bg-primary/5 text-primary",
-    characters: "border-success/30 bg-success/5 text-success",
-    shots: "border-warning/30 bg-warning/5 text-warning",
-    default: "border-base-300 bg-base-100 text-base-content",
+    outline: "bg-primary/[0.05] text-primary shadow-[inset_0_0_0_1px_rgba(140,29,47,0.14)]",
+    characters: "bg-success-tint text-success shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-success)_18%,transparent)]",
+    shots: "bg-warning-tint text-warning shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-warning)_18%,transparent)]",
+    default: "bg-base-200 text-ink-2",
   }[tone];
 
   return (
-    <div className="rounded-lg border border-base-300 bg-base-100 overflow-hidden">
-      <div className={cn("px-3 py-2 border-b flex items-center gap-2", accentClass)}>
-        <span className="h-7 w-7 rounded-md bg-base-100/80 flex items-center justify-center shrink-0">
-          <Icon className="h-4 w-4" />
+    <div className="overflow-hidden rounded-[6px] bg-base-100 shadow-[inset_0_0_0_1px_var(--color-line)]">
+      <div className={cn("flex items-center gap-2 px-3 py-2", accentClass)}>
+        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-surface/70">
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold truncate">{title}</p>
-          <p className="text-xs opacity-80">{nodeLabel}</p>
+          <p className="truncate text-[12.5px] font-medium">{title}</p>
+          <p className="text-[11px] opacity-75">{nodeLabel}</p>
         </div>
         <span className="badge badge-sm badge-success gap-1">
           <CheckCircle2 className="h-3 w-3" />
@@ -307,10 +307,10 @@ function StructuredOutputCard({
         </span>
       </div>
       <div className="px-3 py-3">
-        <p className="text-sm whitespace-pre-wrap break-words leading-6">{body || content}</p>
-        <div className="mt-3 flex items-center justify-between border-t border-base-200 pt-2">
-          <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Sparkles className="h-3 w-3" />
+        <p className="whitespace-pre-wrap break-words text-[12.5px] leading-6 text-ink-2">{body || content}</p>
+        <div className="mt-3 flex items-center justify-between border-t border-line-soft pt-2">
+          <span className="flex items-center gap-1 text-[11px] text-ink-4">
+            <Sparkles className="h-3 w-3" strokeWidth={1.8} />
             已同步到左侧画布节点
           </span>
           {onCollapse && (
