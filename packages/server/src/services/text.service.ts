@@ -4,6 +4,10 @@ import type { LlmChatMessage, LlmChatResponse, ToolDefinition, ToolCall } from "
 
 @Injectable()
 export class TextService {
+  // 进程级请求队列：多数 LLM 账号并发限制为 1（如 Kimi），把请求串行化，
+  // 从源头避免"并发超限"型 429；重试只需处理偶发的 RPM 频率限制。
+  private static requestQueue: Promise<unknown> = Promise.resolve();
+
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
 
   async generate(
@@ -27,6 +31,8 @@ export class TextService {
       this.config.get<string>("app.textEndpoint") ||
       this.config.get<string>("TEXT_ENDPOINT") ||
       "/chat/completions";
+    const forceTemperature = this.config.get<number>("app.textForceTemperature");
+    const timeoutMs = this.config.get<number>("app.textTimeoutMs") || 300_000;
 
     console.log(`[TextService] provider=${provider} model=${model}`);
     console.log(`[TextService] url=${baseUrl}${endpoint}`);
@@ -52,20 +58,22 @@ export class TextService {
         { role: "user", content: prompt },
       ],
       max_tokens: options?.maxTokens || 4096,
-      temperature: options?.temperature ?? 0.7,
-    };
+      temperature: forceTemperature ?? options?.temperature ?? 0.7,
+    } as Record<string, unknown>;
+    const reasoningEffort = this.config.get<string>("app.textReasoningEffort");
+    if (reasoningEffort) body.reasoning_effort = reasoningEffort;
 
     console.log(`[TextService] → POST ${baseUrl}${endpoint}`);
 
     try {
-      const response = await fetch(`${baseUrl}${endpoint}`, {
+      const response = await this.fetchWithRetry(`${baseUrl}${endpoint}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       console.log(`[TextService] ← HTTP ${response.status}`);
@@ -136,6 +144,7 @@ export class TextService {
       this.config.get<string>("app.textEndpoint") ||
       this.config.get<string>("TEXT_ENDPOINT") ||
       "/chat/completions";
+    const timeoutMs = this.config.get<number>("app.textTimeoutMs") || 300_000;
 
     if (!apiKey) {
       throw new Error("TOOLS_UNSUPPORTED: API key not configured");
@@ -154,24 +163,30 @@ export class TextService {
       })),
       tool_choice: "auto",
       max_tokens: options?.maxTokens || 4096,
-      temperature: options?.temperature ?? 0.7,
-    };
+      temperature: this.config.get<number>("app.textForceTemperature") ?? options?.temperature ?? 0.7,
+    } as Record<string, unknown>;
+    const reasoningEffort = this.config.get<string>("app.textReasoningEffort");
+    if (reasoningEffort) body.reasoning_effort = reasoningEffort;
 
     console.log(`[TextService] tools → POST ${baseUrl}${endpoint} | tools=${tools.map((t) => t.name).join(",")}`);
 
-    const response = await fetch(`${baseUrl}${endpoint}`, {
+    const response = await this.fetchWithRetry(`${baseUrl}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error");
       console.error(`[TextService] tool-calls error ${response.status}: ${errorText}`);
+      // 429 重试耗尽：不要误判成"不支持 tools"去降级 JSON——那只会再撞一次限流
+      if (response.status === 429) {
+        throw new Error(`LLM API error 429 (rate limit, retries exhausted): ${errorText.substring(0, 200)}`);
+      }
       // 上游不支持 tools 时抛特定错误，ToolLoop 会降级到 JSON 协议重试
       throw new Error(`TOOLS_UNSUPPORTED: LLM API error ${response.status}: ${errorText.substring(0, 200)}`);
     }
@@ -183,6 +198,93 @@ export class TextService {
     const toolCalls = parseWireToolCalls(message.tool_calls);
     console.log(`[TextService] tools ← content=${content.length} chars, toolCalls=${toolCalls.length}`);
     return { content, toolCalls };
+  }
+
+  /**
+   * 带 429 限流自动重试的 fetch。
+   *
+   *  reasoning 模型账号常有 RPM / 并发限制（如 Kimi 3 次/分钟、并发 1），
+   *  流水线连续调用会撞 429。这里在遇到 429 时按指数退避自动等待重试，
+   *  优先采用服务端 Retry-After / 错误信息里建议的等待秒数。
+   *  网络层错误（fetch 抛异常）也一并重试，提升弱网下的稳定性。
+   */
+  private async fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+    // 排队：等上一个请求（含其重试）彻底结束再发，保证任一时刻只发一个请求
+    const previous = TextService.requestQueue;
+    let release!: () => void;
+    TextService.requestQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    try {
+      return await this.doFetchWithRetry(url, init);
+    } finally {
+      release();
+    }
+  }
+
+  private async doFetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+    const maxRetries = this.config.get<number>("app.textMaxRetries") ?? 6;
+    const baseDelayMs = this.config.get<number>("app.textRetryBaseMs") ?? 1000;
+    let lastNetworkError: unknown;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await fetch(url, init);
+      } catch (error) {
+        lastNetworkError = error;
+        if (attempt >= maxRetries) break;
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        console.warn(
+          `[TextService] 网络错误，${delay}ms 后重试 (${attempt + 1}/${maxRetries}): ${String(error)}`,
+        );
+        await this.sleep(delay);
+        continue;
+      }
+
+      if (response.status !== 429 || attempt >= maxRetries) {
+        return response;
+      }
+
+      const delay = await this.resolveRetryDelay(response, baseDelayMs, attempt);
+      console.warn(
+        `[TextService] 429 限流，${delay}ms 后重试 (${attempt + 1}/${maxRetries})`,
+      );
+      await this.sleep(delay);
+    }
+
+    if (lastNetworkError instanceof Error) throw lastNetworkError;
+    throw new Error("LLM API error 429: 重试已耗尽");
+  }
+
+  /** 解析等待时间：优先服务端建议（Retry-After 头 / 错误信息），否则指数退避；都加随机抖动防同步重试。 */
+  private async resolveRetryDelay(
+    response: Response,
+    baseDelayMs: number,
+    attempt: number,
+  ): Promise<number> {
+    let suggestedMs = 0;
+
+    const retryAfter = response.headers.get("retry-after");
+    if (retryAfter) {
+      const seconds = parseFloat(retryAfter);
+      if (!Number.isNaN(seconds) && seconds >= 0) suggestedMs = seconds * 1000;
+    }
+
+    if (!suggestedMs) {
+      const errorText = await response.text().catch(() => "");
+      const match = errorText.match(/after\s+(\d+(?:\.\d+)?)\s*(?:second|s)\b/i);
+      if (match) suggestedMs = parseFloat(match[1]) * 1000;
+    }
+
+    const backoffMs = baseDelayMs * Math.pow(2, attempt);
+    const jitterMs = Math.floor(Math.random() * 500);
+    return Math.max(suggestedMs, backoffMs) + jitterMs;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private fakeToolLoop(messages: LlmChatMessage[], tools: ToolDefinition[]): LlmChatResponse {

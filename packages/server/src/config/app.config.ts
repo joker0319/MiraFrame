@@ -43,6 +43,23 @@ export const appConfig = registerAs("app", () => ({
   textModel: process.env.TEXT_MODEL || "deepseek-v4-flash",
   textEndpoint: process.env.TEXT_ENDPOINT || "/chat/completions",
   textEnableThinking: process.env.TEXT_ENABLE_THINKING === "true",
+  // 推理模型（如 kimi-k3）只允许固定 temperature，设置后覆盖所有调用
+  textForceTemperature: process.env.TEXT_FORCE_TEMPERATURE
+    ? parseFloat(process.env.TEXT_FORCE_TEMPERATURE)
+    : undefined,
+  // 文本生成超时（毫秒）：推理模型较慢，默认 300s
+  textTimeoutMs: process.env.TEXT_TIMEOUT_MS
+    ? parseInt(process.env.TEXT_TIMEOUT_MS, 10)
+    : 300_000,
+  // 推理强度（如 kimi-k3 的 low/high/max），不设置则不传该字段
+  textReasoningEffort: process.env.TEXT_REASONING_EFFORT || undefined,
+  // 429 限流自动重试：最多重试次数与基础退避毫秒（按 2^n 指数退避）
+  textMaxRetries: process.env.TEXT_MAX_RETRIES
+    ? parseInt(process.env.TEXT_MAX_RETRIES, 10)
+    : 6,
+  textRetryBaseMs: process.env.TEXT_RETRY_BASE_MS
+    ? parseInt(process.env.TEXT_RETRY_BASE_MS, 10)
+    : 1000,
   fakeTextResponse: process.env.FAKE_TEXT_RESPONSE || null,
 
   // ── 图像生成 ──
@@ -61,6 +78,17 @@ export const appConfig = registerAs("app", () => ({
   videoModel: process.env.VIDEO_MODEL || "video-gen-1",
   videoEndpoint: process.env.VIDEO_ENDPOINT || "/videos/generations",
   videoMode: process.env.VIDEO_MODE || "text",
+  // 视频生成超时（毫秒）：异步任务（如 Agnes）轮询上限，默认 300s
+  videoTimeoutMs: process.env.VIDEO_TIMEOUT_MS
+    ? parseInt(process.env.VIDEO_TIMEOUT_MS, 10)
+    : 300_000,
+  // 视频提交重试（针对 503 队列满 / 429 限流）：次数与基础退避毫秒（按 2^n 递增）
+  videoMaxRetries: process.env.VIDEO_MAX_RETRIES
+    ? parseInt(process.env.VIDEO_MAX_RETRIES, 10)
+    : 6,
+  videoRetryBaseMs: process.env.VIDEO_RETRY_BASE_MS
+    ? parseInt(process.env.VIDEO_RETRY_BASE_MS, 10)
+    : 5000,
   enableImageToVideo: process.env.ENABLE_IMAGE_TO_VIDEO === "true",
   videoImageMode: process.env.VIDEO_IMAGE_MODE || "first_frame",
   videoInlineLocalImages: process.env.VIDEO_INLINE_LOCAL_IMAGES !== "false",
