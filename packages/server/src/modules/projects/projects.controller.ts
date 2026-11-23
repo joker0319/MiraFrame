@@ -6,17 +6,21 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   HttpCode,
   HttpStatus,
   Inject,
   UseInterceptors,
   UploadedFile,
+  BadRequestException,
+  NotFoundException,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { DRIZZLE, type Db, schema } from "../../db";
 import { WsGateway } from "../../ws";
 import { eq, desc, asc, inArray } from "drizzle-orm";
 import { AgentService } from "../../agent";
+import { ConsistencyService } from "../../services/consistency.service";
 
 // ---- Projects CRUD ----
 
@@ -26,6 +30,7 @@ export class ProjectsController {
     @Inject(DRIZZLE) private readonly db: Db,
     @Inject(WsGateway) private readonly wsGateway: WsGateway,
     @Inject(AgentService) private readonly agentService: AgentService,
+    @Inject(ConsistencyService) private readonly consistencyService: ConsistencyService,
   ) {}
 
   @Get()
@@ -138,6 +143,47 @@ export class ProjectsController {
       .from(schema.shots)
       .where(eq(schema.shots.projectId, parseInt(id)))
       .orderBy(asc(schema.shots.order));
+  }
+
+  // ---- 角色一致性校验 ----
+
+  /**
+   * 拿角色参考图的人脸特征，去比每个镜头里的人脸，判断长相是否漂移。
+   * 首次调用需要下载并推理 9 张左右图片（约 15-25 秒），之后命中进程内缓存。
+   */
+  @Get(":id/consistency")
+  async checkConsistency(@Param("id") id: string, @Query("refresh") refresh?: string) {
+    const projectId = parseInt(id, 10);
+    if (!Number.isFinite(projectId)) throw new BadRequestException("项目 id 不合法");
+    if (refresh === "1" || refresh === "true") this.consistencyService.clearCache();
+
+    const [characters, shots] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.characters)
+        .where(eq(schema.characters.projectId, projectId))
+        .orderBy(asc(schema.characters.id)),
+      this.db.select().from(schema.shots).where(eq(schema.shots.projectId, projectId)).orderBy(asc(schema.shots.order)),
+    ]);
+
+    if (characters.length === 0) throw new NotFoundException("该项目还没有角色");
+    if (shots.length === 0) throw new NotFoundException("该项目还没有分镜");
+
+    const report = await this.consistencyService.analyze({
+      characters: characters.map((c) => ({
+        id: c.id,
+        name: c.name,
+        imageUrl: c.imageUrl,
+        referenceImages: c.referenceImages,
+      })),
+      shots: shots.map((s) => ({
+        id: s.id,
+        order: s.order,
+        imageUrl: s.imageUrl,
+        characterIds: s.characterIds,
+      })),
+    });
+    return { ...report, projectId };
   }
 
   // ---- Messages ----

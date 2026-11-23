@@ -280,3 +280,32 @@ VIDEO_TIMEOUT_MS=300000
 - 逐镜头独立配音再拼接，不跨镜头做整体音量归一，镜头间响度会有差异（原片环境声音量本身从 −53dB 到 −13dB 不等）。
 - 无台词镜头保留原声，若原声本身接近静音（如镜头 1 的 −53dB），观感上会是「默片段」。
 - 字幕只生成 `.srt` 外挂文件，未烧进画面（避免中文字体缺失），前端也还没有字幕显示 UI。
+
+## 角色一致性校验：把「写好了没接线」的人脸模型真正跑起来
+
+**背景**：`FaceService` 存在已久，但只在 `services.module` 的 providers 里挂着，全仓零调用；`characters` 表有 `face_embedding` / `reference_images` 两列也从没写入过。单测跑一遍才发现它**从来没加载成功过** —— 日志里每行都是 `failed to load models: The highest priority backend 'wasm' has not yet been initialized`，被 `console.warn` 吞掉，看起来"只是没用到"，实际是"跑不起来"。
+
+**三个必须踩的坑**
+1. **后端没初始化**：`face-api.node-wasm.js` 需要先 `setBackend` + `ready`。最初切到 `cpu` 只是能跑，但纯 JS 后端一次 SSD 要 4.5 秒（9 张图 41 秒）。真正的解法是把 wasm 后端拉起来：bundle 内部 `require("@tensorflow/tfjs-backend-wasm")`，所以只要对同一份模块 `setWasmPaths(dist)` 再 `setBackend("wasm")`，速度直接到 **1.8 秒 / 9 张图**（约 23 倍）。cpu 作为兜底保留。
+2. **媒体类型注入**：face-api 用 tfjs env 里的 `Image`/`Canvas` 做 `instanceof` 判断，只改 `globalThis` 无效，必须 `faceapi.env.monkeyPatch({ Canvas, Image, ImageData })`，否则报 `toNetInput - expected media to be of type HTMLImageElement`。
+3. **`face-api.node.js` 这条路走不通**：它 `require("@tensorflow/tfjs-node")`，而 pnpm 的隔离结构下 face-api 的目录里解析不到这个包（服务端 node_modules 里有，但那是给我们的代码用的）。
+
+**改动**
+- `services/face.service.ts`：重写初始化（wasm 优先 + cpu 兜底 + `env.monkeyPatch`）；新增 `detect(pathOrBuffer)` 返回原图坐标 + 128 维 descriptor，检测前按长边缩到 640；保留 `detectFaces(base64)` 兼容 sidecar。
+- `services/consistency.ts`（新，纯函数）：判定逻辑。多角色同框用「全局最近优先的贪心指派」，保证一张脸只对应一个角色；额外人脸分三类 —— `other_character`（别的已登记角色）、`lookalike`（和本镜已指派的角色撞脸，多半是重复检出）、`unknown`（谁都不像）。
+- `services/consistency.service.ts`（新）：下载图片（按 URL 哈希缓存到 tmp）、跑检测、调判定。进程内按 URL 缓存检测结果，重复调用不重算。
+- `GET /api/v1/projects/:id/consistency?refresh=1`：按需计算返回报告，不落库。
+- `ConsistencyPanel.tsx`（新）：挂在「角色设定」「镜头画面」两个节点的详情面板底部，进入即自动检查一次，可「重新检查」；顶部汇总 + 每镜一行（编号 / 状态点 / 结论 / 右侧各角色距离）。
+- `consistencyApi.ts` + `types/index.ts`：原来那套 `consistency-eval` / `consistency-report` / `eval_id` 的契约是设想中的异步方案（要建表存报告、跑后台任务），后端从未实现，前端也从没调用过 —— 连同 `FaceMatchDetailRead` / `CharacterConsistencyRead` / `ProjectConsistencyRead` 一并替换成实际契约。
+
+**判定规则（可配置）**
+- ≤ 0.45 一致；0.45–0.60 待确认；> 0.60 漂移（阈值 `FACE_OK_DISTANCE` / `FACE_DRIFT_DISTANCE`）。
+- 参考图检不出脸的角色标 `no_reference`，**不参与判定也不算失败**，因为「检不出脸」不等于「长得不像」；若该镜头又出现陌生脸，提示里会补一句「可能是无法校验的 X」。
+
+**project-23 实测（6 镜头 / 3 角色）**
+- 沈鸢 4 个镜头 0.36–0.41（一致），2 个镜头 0.46（灰区，待确认）；镜头 3 另有一张脸也接近沈鸢（0.51）。
+- 阿砚（半透明少年亡魂）参考图**检不出人脸**，无法自动校验 —— 这不是 bug，是检测器对人形半透明轮廓的固有限制。
+- 镜头 4、6 各检出 1 张未登记人脸（0.73 / 0.64），后者提示可能是阿砚。
+- 端到端 1.85 秒（含 9 张图下载 + 推理），命中缓存后更快。
+
+**验证**：新增 16 个单测（多角色同框不抢脸、灰区措辞、缺人、无参考图不诬告、多参考图取最近、陌生脸/撞脸分类）；后端 44 个测试全通过；`tsc` 0 错误；浅色 + 墨夜双主题截图核对。

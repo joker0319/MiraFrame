@@ -627,43 +627,49 @@ export interface StyleTemplateUpdatePayload {
 }
 
 // --- Consistency Evaluation ---
-export interface FaceMatchDetailRead {
-  shot_id: number;
-  shot_order: number;
-  similarity: number;
-  detected: boolean;
+// 后端按需计算，不落库：每次请求都基于当前的角色参考图与镜头图重新比对。
+export type ConsistencyExpectedStatus = "consistent" | "review" | "drift" | "missing" | "no_reference";
+export type ConsistencyShotVerdict = "ok" | "review" | "drift" | "unverifiable";
+
+export interface ConsistencyCharacterRefRead {
+  characterId: number;
+  name: string;
+  /** 参考图里检出的可用人脸数；为 0 表示这个人脸无法自动校验 */
+  referenceFaces: number;
 }
 
-export interface CharacterConsistencyRead {
-  character_id: number;
-  character_name: string;
-  face_similarity_mean: number;
-  face_similarity_std: number;
-  presence_rate: number;
-  overall_score: number;
-  face_matches: FaceMatchDetailRead[];
-  grade: "A" | "B" | "C" | "D" | "F";
+export interface ConsistencyExpectedRead {
+  characterId: number;
+  name: string;
+  status: ConsistencyExpectedStatus;
+  /** 与参考特征的欧氏距离 */
+  distance: number | null;
 }
 
-export interface ProjectConsistencyRead {
-  project_id: number;
-  overall_score: number;
-  character_reports: CharacterConsistencyRead[];
-  evaluated_at: string;
-  eval_id?: string;
+export interface ConsistencyExtraFaceRead {
+  box?: { x: number; y: number; width: number; height: number };
+  score: number;
+  nearestCharacterId: number | null;
+  nearestName: string | null;
+  distance: number | null;
+  kind: "other_character" | "lookalike" | "unknown";
 }
 
-export interface ConsistencyEvalResponse {
-  eval_id: string;
-  status: string;
+export interface ConsistencyShotRead {
+  shotId: number;
+  order: number;
+  expected: ConsistencyExpectedRead[];
+  extraFaces: ConsistencyExtraFaceRead[];
+  verdict: ConsistencyShotVerdict;
+  message: string;
 }
 
 export interface ConsistencyReportRead {
-  id: number;
-  project_id: number;
-  overall_score: number;
-  created_at: string;
-  report_data: ProjectConsistencyRead | null;
+  projectId: number;
+  thresholds: { ok: number; drift: number; matchLimit: number };
+  characters: ConsistencyCharacterRefRead[];
+  shots: ConsistencyShotRead[];
+  summary: { ok: number; review: number; drift: number; unverifiable: number };
 }
 
 // --- Universe / IP ---

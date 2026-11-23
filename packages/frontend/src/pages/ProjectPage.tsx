@@ -247,6 +247,7 @@ export default function ProjectPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Canvas — reads from store (real-time WS updates) */}
         <CanvasArea
+          projectId={parseInt(id ?? "", 10)}
           projectTitle={projectTitle}
           currentStage={currentStage}
           isGenerating={isGenerating}
@@ -269,6 +270,7 @@ export default function ProjectPage() {
 
 /** Canvas area — reads from Zustand stores for real-time WS updates */
 function CanvasArea({
+  projectId,
   projectTitle,
   currentStage,
   isGenerating,
@@ -282,6 +284,7 @@ function CanvasArea({
   onSubmitRevision,
   isSubmittingRevision,
 }: {
+  projectId: number;
   projectTitle: string | null;
   currentStage: string;
   isGenerating: boolean;
@@ -449,6 +452,7 @@ function CanvasArea({
 
           <aside className="border-t xl:border-t-0 xl:border-l border-line bg-surface overflow-y-auto">
             <NodeDetail
+              projectId={projectId}
               selectedNode={selectedNode}
               outline={outlineRecord}
               visualBible={visualBible}

@@ -94,6 +94,9 @@ export const appConfig = registerAs("app", () => ({
   videoInlineLocalImages: process.env.VIDEO_INLINE_LOCAL_IMAGES !== "false",
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
   ffprobePath: process.env.FFPROBE_PATH || "ffprobe",
+  // 角色一致性判定阈值（人脸特征欧氏距离）：≤ ok 视为同一人，> drift 视为漂移
+  faceOkDistance: parseFloat(process.env.FACE_OK_DISTANCE || "0.45"),
+  faceDriftDistance: parseFloat(process.env.FACE_DRIFT_DISTANCE || "0.6"),
   // 豆包
   doubaoApiKey: process.env.DOUBAO_API_KEY || null,
   doubaoVideoModel:

@@ -31,8 +31,10 @@ import {
   type WorkflowNode,
 } from "@/utils/projectWorkflow";
 import { WorkflowStatusBadge } from "./WorkflowStatusBadge";
+import { ConsistencyPanel } from "./ConsistencyPanel";
 
 export function NodeDetail({
+  projectId,
   selectedNode,
   outline,
   visualBible,
@@ -50,6 +52,7 @@ export function NodeDetail({
   onSubmitRevision,
   isSubmittingRevision,
 }: {
+  projectId: number;
   selectedNode: WorkflowNode;
   outline: Record<string, unknown> | null;
   visualBible: string | null;
@@ -207,6 +210,10 @@ export function NodeDetail({
           />
         )}
       </div>
+
+      {(selectedNode.id === "characters" || selectedNode.id === "shotImages") &&
+        characters.length > 0 &&
+        shots.some((s) => s.image_url) && <ConsistencyPanel projectId={projectId} />}
 
       {isEditableWorkflowNode(selectedNode.id) && (
         <RevisionPanel
