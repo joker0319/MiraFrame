@@ -93,6 +93,7 @@ export const appConfig = registerAs("app", () => ({
   videoImageMode: process.env.VIDEO_IMAGE_MODE || "first_frame",
   videoInlineLocalImages: process.env.VIDEO_INLINE_LOCAL_IMAGES !== "false",
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
+  ffprobePath: process.env.FFPROBE_PATH || "ffprobe",
   // 豆包
   doubaoApiKey: process.env.DOUBAO_API_KEY || null,
   doubaoVideoModel:
@@ -106,9 +107,24 @@ export const appConfig = registerAs("app", () => ({
 
   // ── TTS / BGM ──
   ttsEnabled: process.env.TTS_ENABLED !== "false",
-  ttsDefaultVoice:
-    process.env.TTS_DEFAULT_VOICE || "zh-CN-XiaoxiaoNeural",
+  // 配音引擎：macos（系统 say，离线免费）/ edge（微软在线，端点当前失效）/ none
+  ttsProvider: process.env.TTS_PROVIDER || "macos",
+  ttsDefaultVoice: process.env.TTS_DEFAULT_VOICE || "Tingting",
+  // 音色缺失时的兜底音色
+  ttsVoiceFallback: process.env.TTS_VOICE_FALLBACK || "Tingting",
+  // 角色名 → 音色的显式映射，JSON 字符串，如 {"沈鸢":"Sandy (中文（中国大陆）)"}
+  ttsVoiceMap: process.env.TTS_VOICE_MAP || "",
+  // 基础语速（字/分钟），中文 210 约每秒 6 字
+  ttsBaseRate: parseInt(process.env.TTS_RATE || "210", 10),
   ttsVolume: parseFloat(process.env.TTS_VOLUME || "1.0"),
+  ttsTimeoutMs: parseInt(process.env.TTS_TIMEOUT_MS || "30000", 10),
+  // 人声相对画面起点的延时，避免第一帧就开口
+  ttsLeadMs: parseInt(process.env.TTS_LEAD_MS || "250", 10),
+  // 台词超出镜头时长时，人声最大加速倍率（超过则冻结末帧延长画面）
+  // atempo 是保音高的时域拉伸，倍率过高会显得赶，宁可用定格补时
+  ttsMaxTempo: parseFloat(process.env.TTS_MAX_TEMPO || "1.2"),
+  // 原视频音轨（模型自带的环境声）作为底噪的音量，0.08 ≈ -22dB
+  ttsBgmVolume: parseFloat(process.env.TTS_BGM_VOLUME || "0.08"),
   bgmEnabled: process.env.BGM_ENABLED !== "false",
   bgmVolume: parseFloat(process.env.BGM_VOLUME || "0.3"),
   bgmDirectory: process.env.BGM_DIRECTORY || "static/bgm",

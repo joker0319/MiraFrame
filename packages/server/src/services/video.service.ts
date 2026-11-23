@@ -1,14 +1,19 @@
 import { Injectable, Inject } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createWriteStream } from "node:fs";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { extractMediaUrl, extractTaskId, extractTaskStatus } from "./image.service";
+import { TtsService } from "./tts.service";
+import { planDialogue, type DialogueSegment } from "./dialogue";
 
 @Injectable()
 export class VideoService {
-  constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
+  constructor(
+    @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(TtsService) private readonly tts: TtsService,
+  ) {}
 
   async generateVideo(
     prompt: string,
@@ -104,7 +109,18 @@ export class VideoService {
     throw new Error(`Video API returned no URL: ${JSON.stringify(json).substring(0, 300)}`);
   }
 
-  async composeVideo(projectId: number, clipUrls: string[]): Promise<string> {
+  /**
+   * 合成为成片。
+   *
+   * 传入 dialogues 时会给每个镜头配上人声：原视频自带的音轨压成底噪（默认 0.08 ≈ -22dB），
+   * 台词按角色音色合成后混入主轨；台词超出镜头时长时先加速人声（上限 maxTempo），
+   * 仍不够就冻结末帧延长画面，保证话说完、画面不断。
+   */
+  async composeVideo(
+    projectId: number,
+    clipUrls: string[],
+    options: ComposeOptions = {},
+  ): Promise<string> {
     const exportDir = join(process.cwd(), "static", "exports", `project-${projectId}`);
     const workDir = join(exportDir, "clips");
     await mkdir(exportDir, { recursive: true });
@@ -117,11 +133,39 @@ export class VideoService {
       clipPaths.push(clipPath);
     }
 
+    const spec = await probeMedia(clipPaths[0], this.ffprobePath);
+    const stagePaths: string[] = [];
+    const cues: SubtitleCue[] = [];
+    let timeline = 0;
+    let voicedShots = 0;
+
+    for (let i = 0; i < clipPaths.length; i += 1) {
+      const raw = this.tts.enabled ? options.dialogues?.[i] : null;
+      const plan = raw ? planDialogue(raw, { descriptions: options.characterDescriptions, baseRate: this.ttsBaseRate }) : [];
+      const staged = join(workDir, `stage-${String(i + 1).padStart(2, "0")}.mp4`);
+
+      const result = await this.buildStagedClip({
+        clipPath: clipPaths[i],
+        plan,
+        index: i,
+        spec,
+        outPath: staged,
+        workDir,
+      });
+
+      stagePaths.push(staged);
+      if (result.voiced) {
+        voicedShots += 1;
+        cues.push({ start: timeline, end: timeline + result.duration, text: buildCueText(plan) });
+      }
+      timeline += result.duration;
+    }
+
     const concatListPath = join(workDir, "concat.txt");
-    await writeFile(concatListPath, clipPaths.map((path) => `file '${escapeConcatPath(path)}'`).join("\n"), "utf-8");
+    await writeFile(concatListPath, stagePaths.map((path) => `file '${escapeConcatPath(path)}'`).join("\n"), "utf-8");
 
     const outputPath = join(exportDir, "final.mp4");
-    const ffmpegPath = this.config.get<string>("app.ffmpegPath") || "ffmpeg";
+    const ffmpegPath = this.ffmpegPath;
     await runFfmpeg(ffmpegPath, [
       "-y",
       "-f",
@@ -132,16 +176,203 @@ export class VideoService {
       concatListPath,
       "-c:v",
       "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
       "-c:a",
       "aac",
+      "-b:a",
+      "128k",
       "-movflags",
       "+faststart",
       outputPath,
     ]);
     await chmod(outputPath, 0o644);
-    await writeFile(join(exportDir, "composition.html"), buildCompositionHtml(clipUrls), "utf-8");
+
+    // 字幕与成片同目录，播放器可外挂；不烧进画面，避免中文字体缺失
+    await writeFile(join(exportDir, "final.srt"), buildSrt(cues), "utf-8");
+    await writeFile(
+      join(exportDir, "composition.html"),
+      buildCompositionHtml(clipUrls, { voicedShots, totalShots: clipPaths.length }),
+      "utf-8",
+    );
+    console.log(
+      `[Compose] project ${projectId}: ${clipPaths.length} 个镜头，${voicedShots} 个带配音，总长 ${timeline.toFixed(1)}s`,
+    );
+
     const publicBaseUrl = this.config.get<string>("app.publicBaseUrl") || "http://localhost:3000";
     return `${publicBaseUrl}/static/exports/project-${projectId}/final.mp4`;
+  }
+
+  private get ffmpegPath(): string {
+    return this.config.get<string>("app.ffmpegPath") || "ffmpeg";
+  }
+
+  private get ffprobePath(): string {
+    return this.config.get<string>("app.ffprobePath") || "ffprobe";
+  }
+
+  private get ttsBaseRate(): number {
+    return this.config.get<number>("app.ttsBaseRate") ?? 210;
+  }
+
+  /**
+   * 处理单个镜头：合成台词 → 人声与画面混流 → 统一编码规格。
+   * 无论有没有台词都会重编码，保证 concat 时所有片段的编码参数一致。
+   */
+  private async buildStagedClip(input: {
+    clipPath: string;
+    plan: DialogueSegment[];
+    index: number;
+    spec: MediaSpec;
+    outPath: string;
+    workDir: string;
+  }): Promise<{ duration: number; voiced: boolean }> {
+    const { clipPath, plan, index, spec, outPath, workDir } = input;
+    const clip = await probeMedia(clipPath, this.ffprobePath);
+    const clipDuration = clip.duration || 5;
+    const lead = Math.max(0, (this.config.get<number>("app.ttsLeadMs") ?? 250) / 1000);
+    const bgmVolume = this.config.get<number>("app.ttsBgmVolume") ?? 0.08;
+    const maxTempo = this.config.get<number>("app.ttsMaxTempo") ?? 1.35;
+
+    let dialoguePath: string | null = null;
+    let dialogueDuration = 0;
+    let tempo = 1;
+
+    if (plan.length > 0) {
+      try {
+        dialoguePath = await this.buildDialogueTrack(plan, join(workDir, `voice-${String(index + 1).padStart(2, "0")}`));
+        dialogueDuration = (await probeMedia(dialoguePath, this.ffprobePath)).duration;
+      } catch (error) {
+        console.warn(`[Compose] 镜头 ${index + 1} 配音失败，跳过人声：${(error as Error).message}`);
+        dialoguePath = null;
+        dialogueDuration = 0;
+      }
+    }
+
+    const voiced = Boolean(dialoguePath) && dialogueDuration > 0;
+    if (voiced) {
+      const available = Math.max(1, clipDuration - lead - 0.15);
+      if (dialogueDuration > available) {
+        tempo = Math.min(maxTempo, dialogueDuration / available);
+      }
+    }
+
+    // 加速后仍超出，就延长画面（冻结末帧），确保最后一句不被截断
+    const spokenAfterTempo = voiced ? dialogueDuration / tempo : 0;
+    const needed = voiced ? lead + spokenAfterTempo + 0.25 : 0;
+    const finalDuration = Math.max(clipDuration, needed);
+    const extra = Math.max(0, finalDuration - clipDuration);
+
+    const targetSize = `scale=${spec.width}:${spec.height}:force_original_aspect_ratio=decrease,pad=${spec.width}:${spec.height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+    const videoChain = `[0:v]${targetSize},fps=${spec.fps}${extra > 0.02 ? `,tpad=stop_mode=clone:stop_duration=${extra.toFixed(3)}` : ""}[v]`;
+    const args: string[] = ["-y", "-i", clipPath];
+
+    let filter: string;
+    if (voiced && dialoguePath) {
+      args.push("-i", dialoguePath);
+      const tempoChain = tempo > 1.02 ? `atempo=${tempo.toFixed(3)},` : "";
+      const voiceChain =
+        `[1:a]${tempoChain}` +
+        `adelay=${Math.round(lead * 1000)}|${Math.round(lead * 1000)},` +
+        `apad=whole_dur=${finalDuration.toFixed(3)},atrim=0:${finalDuration.toFixed(3)}[vo]`;
+
+      if (clip.hasAudio) {
+        filter =
+          `${videoChain};` +
+          `[0:a]volume=${bgmVolume},apad=whole_dur=${finalDuration.toFixed(3)},atrim=0:${finalDuration.toFixed(3)}[bg];` +
+          `${voiceChain};` +
+          `[bg][vo]amix=inputs=2:duration=longest:normalize=0:dropout_transition=0,alimiter=limit=0.95[a]`;
+      } else {
+        filter = `${videoChain};${voiceChain};[vo]alimiter=limit=0.95[a]`;
+      }
+      args.push("-filter_complex", filter, "-map", "[v]", "-map", "[a]");
+    } else if (clip.hasAudio) {
+      // 没有台词的镜头保留环境原声，不做压缩
+      filter = `${videoChain}`;
+      args.push("-filter_complex", filter, "-map", "[v]", "-map", "0:a");
+    } else {
+      // 无音轨的镜头补一条静音，保证拼接时音轨结构一致
+      args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100");
+      filter = `${videoChain}`;
+      args.push("-filter_complex", filter, "-map", "[v]", "-map", "1:a", "-shortest");
+    }
+
+    args.push(
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-ar",
+      "44100",
+      "-ac",
+      "2",
+      "-movflags",
+      "+faststart",
+      outPath,
+    );
+
+    await runFfmpeg(this.ffmpegPath, args);
+    if (dialoguePath) await rm(dialoguePath, { force: true }).catch(() => undefined);
+    return { duration: finalDuration, voiced };
+  }
+
+  /** 把同一镜头的多句台词按顺序拼成一条音轨，句间留停顿 */
+  private async buildDialogueTrack(plan: DialogueSegment[], basePath: string): Promise<string> {
+    const parts: string[] = [];
+    for (let i = 0; i < plan.length; i += 1) {
+      const line = plan[i];
+      const synth = await this.tts.synthesize({
+        text: line.text,
+        voice: line.voice.voice,
+        rate: line.voice.rate,
+        volume: line.voice.volume,
+      });
+      if (!synth) continue;
+
+      const rawPath = `${basePath}-${i}-raw.${synth.format}`;
+      const normPath = `${basePath}-${i}.wav`;
+      await writeFile(rawPath, synth.buffer);
+      // 逐句应用音量（轻声要压、喊叫要提），再统一成 22050 单声道 + 句尾 320ms 停顿
+      await runFfmpeg(this.ffmpegPath, [
+        "-y",
+        "-i",
+        rawPath,
+        "-af",
+        `volume=${line.voice.volume.toFixed(2)},apad=pad_dur=0.32`,
+        "-ar",
+        "22050",
+        "-ac",
+        "1",
+        normPath,
+      ]);
+      await rm(rawPath, { force: true }).catch(() => undefined);
+      parts.push(normPath);
+    }
+
+    if (parts.length === 0) throw new Error("没有合成出任何台词音频");
+    const joined = `${basePath}.wav`;
+    if (parts.length === 1) {
+      await runFfmpeg(this.ffmpegPath, ["-y", "-i", parts[0], "-c", "copy", joined]);
+    } else {
+      const listPath = `${basePath}.txt`;
+      await writeFile(listPath, parts.map((path) => `file '${escapeConcatPath(path)}'`).join("\n"), "utf-8");
+      await runFfmpeg(this.ffmpegPath, ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", joined]);
+      await rm(listPath, { force: true }).catch(() => undefined);
+    }
+    for (const part of parts) await rm(part, { force: true }).catch(() => undefined);
+    return joined;
   }
 
   private async generateAgnesVideo(
@@ -282,12 +513,94 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+export interface ComposeOptions {
+  /** 与 clipUrls 一一对应的分镜台词原文，缺省则该镜头不配音 */
+  dialogues?: (string | null)[];
+  /** 角色名 → 角色描述，用于推断音色性别年龄 */
+  characterDescriptions?: Record<string, string>;
+}
+
+interface MediaSpec {
+  width: number;
+  height: number;
+  fps: number;
+}
+
+interface SubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/** ffprobe 读时长、尺寸、帧率与是否存在音轨 */
+async function probeMedia(
+  path: string,
+  ffprobePath: string,
+): Promise<{ duration: number; hasAudio: boolean; width: number; height: number; fps: number }> {
+  const output = await new Promise<string>((resolve, reject) => {
+    const child = spawn(ffprobePath, [
+      "-v",
+      "error",
+      "-print_format",
+      "json",
+      "-show_format",
+      "-show_streams",
+      path,
+    ]);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += String(chunk)));
+    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
+    child.on("error", (error) =>
+      reject(new Error((error as NodeJS.ErrnoException).code === "ENOENT" ? "系统缺少 ffprobe" : error.message)),
+    );
+    child.on("close", (code) => (code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `ffprobe 退出码 ${code}`))));
+  });
+
+  const parsed = JSON.parse(output || "{}") as {
+    format?: { duration?: string };
+    streams?: { codec_type?: string; width?: number; height?: number; r_frame_rate?: string }[];
+  };
+  const streams = parsed.streams || [];
+  const video = streams.find((stream) => stream.codec_type === "video");
+  const [num, den] = (video?.r_frame_rate || "30/1").split("/").map(Number);
+  const fps = den ? Math.round((num / den) * 100) / 100 : 30;
+
+  return {
+    duration: Number(parsed.format?.duration || 0),
+    hasAudio: streams.some((stream) => stream.codec_type === "audio"),
+    width: video?.width || 1280,
+    height: video?.height || 720,
+    fps: Number.isFinite(fps) && fps > 0 ? fps : 30,
+  };
+}
+
+/** 字幕文本：保留说话人，便于对不上口型时判断是谁在说 */
+function buildCueText(plan: DialogueSegment[]): string {
+  return plan.map((line) => (line.speaker === "旁白" ? line.text : `${line.speaker}：${line.text}`)).join("\n");
+}
+
+function buildSrt(cues: SubtitleCue[]): string {
+  const stamp = (seconds: number) => {
+    const total = Math.max(0, seconds);
+    const hh = Math.floor(total / 3600);
+    const mm = Math.floor((total % 3600) / 60);
+    const ss = Math.floor(total % 60);
+    const ms = Math.round((total - Math.floor(total)) * 1000);
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
+  };
+  return cues
+    .map((cue, index) => `${index + 1}\n${stamp(cue.start)} --> ${stamp(cue.end)}\n${cue.text}\n`)
+    .join("\n");
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildCompositionHtml(clipUrls: string[]): string {
+function buildCompositionHtml(clipUrls: string[], stats?: { voicedShots: number; totalShots: number }): string {
   const clipsJson = JSON.stringify(clipUrls).replace(/</g, "\\u003c");
+  const voiceNote = stats ? ` · ${stats.voicedShots}/${stats.totalShots} 个镜头含配音` : "";
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -322,7 +635,7 @@ function buildCompositionHtml(clipUrls: string[]): string {
     function load(i) {
       index = Math.max(0, Math.min(i, clips.length - 1));
       player.src = clips[index];
-      status.textContent = '合成预览：镜头 ' + (index + 1) + ' / ' + clips.length;
+      status.textContent = '合成预览：镜头 ' + (index + 1) + ' / ' + clips.length + '${voiceNote}';
       player.play().catch(() => {});
     }
     player.addEventListener('ended', () => {

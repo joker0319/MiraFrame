@@ -544,8 +544,25 @@ export class AgentProcessor extends WorkerHost {
 	        if (missing.length > 0) {
 	          throw new Error(`还有 ${missing.length} 个镜头视频未完成，无法合成最终输出。`);
 	        }
-	        const clipUrls = shots.map((shot) => shot.videoUrl).filter((url): url is string => Boolean(url));
-	        const videoUrl = clipUrls.length > 0 ? await this.videoService.composeVideo(projectId, clipUrls) : null;
+        const clipUrls = shots.map((shot) => shot.videoUrl).filter((url): url is string => Boolean(url));
+        // 角色描述用于推断音色（少女/老妇/少年），没有则退回按名字判定
+        const characters = await this.db
+          .select()
+          .from(schema.characters)
+          .where(eq(schema.characters.projectId, projectId));
+        const characterDescriptions = Object.fromEntries(
+          characters.map((character) => [
+            character.name,
+            [character.description, character.visualNotes].filter(Boolean).join(" "),
+          ]),
+        );
+        const videoUrl =
+          clipUrls.length > 0
+            ? await this.videoService.composeVideo(projectId, clipUrls, {
+                dialogues: shots.map((shot) => shot.dialogue),
+                characterDescriptions,
+              })
+            : null;
 
 	        await this.db
 	          .update(schema.projects)

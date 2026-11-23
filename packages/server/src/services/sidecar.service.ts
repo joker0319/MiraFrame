@@ -14,7 +14,8 @@ export class SidecarService {
   }
 
   async synthesizeSpeech(text: string, voice?: string): Promise<Buffer> {
-    return this.ttsService.synthesizeSpeech(text, voice);
+    const result = await this.ttsService.synthesize({ text, voice });
+    return result?.buffer ?? Buffer.alloc(0);
   }
 
   async healthCheck(): Promise<{ status: string; face_model_available: boolean }> {

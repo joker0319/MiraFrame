@@ -255,3 +255,28 @@ VIDEO_TIMEOUT_MS=300000
 - CDP 实测：`/universes` → `/projects`、`/universes/1` → `/projects`、`/this-does-not-exist` → `/`，页面内均无「宇宙」字样；`/project/new` 第一步只剩「项目标题 / 故事内容」，布局无空洞。
 
 **恢复前提（备忘）**：需先补 `universes` / `universe_projects` / `shared_characters` 三表 + 模块 + 接口，再接回两个页面与 TopBar 入口；核心待定问题是「跨项目角色一致性与复用」的产品规则。
+
+## 对白配音：从「会动的分镜」到「能听的漫剧」
+
+**背景**：成片 31 秒、6 个镜头，ffprobe 只有模型自带的环境底噪（mean −17.7dB），没有人声。分镜 `dialogue` 字段写得很完整（含「轻声」「画外音/闪回」），但一句都没进成片；`TtsService` 与 `FaceService` 写好后一直只挂在 `services.module` 的 providers 里，从未被调用。
+
+**为什么不用 edge-tts**：`edge-tts-universal@1.4.0` 已是最新版，但微软端点固定返回 403 —— 手动按库的算法生成 `Sec-MS-GEC` 签名后握手仍被拒，直连与走代理结果一致，说明是令牌/协议轮换而非网络问题。因此改用 macOS 系统 `say`：离线、零成本、中文音色齐全，代价是仅限 macOS。
+
+**踩到的坑**：`say -v Sandy` 会匹配到英文版并输出 0.016 秒的近乎空音频，必须写全名 `Sandy (中文（中国大陆）)`。代码里做了「音频小于 4KB 即判定失败并降级」的保护。
+
+**新增与改动**
+- `services/dialogue.ts`（新）：解析「角色（语气）：『台词』」，剥离说话人与舞台指示；按名字/角色描述推断性别年龄选音色，同一角色哈希稳定；语气（轻声/大喊/画外音）转成语速与音量微调；`无台词…` 这类纯音效描述不产生配音。
+- `services/tts.service.ts`：重写为可切换引擎（`TTS_PROVIDER=macos|edge|none`），带超时、空音频检测、音色降级、`probe()` 自检与音色列表缓存。
+- `services/video.service.ts`：`composeVideo` 增加第三参 `{ dialogues, characterDescriptions }`。逐镜头合成人声 → 原音轨压到 `TTS_BGM_VOLUME`（0.08 ≈ −22dB）作底噪 → 人声延迟 250ms 进主轨 → 台词超长时先 `atempo` 加速（上限 1.2，保音高）再 `tpad` 冻结末帧补画面 → 统一重编码后 concat。同时输出 `final.srt`。
+- `agent.processor.ts`：合成前查分镜台词与角色描述，一并传给 `composeVideo`。
+- `config/app.config.ts`：新增 `ffprobePath` 与 `TTS_PROVIDER / TTS_RATE / TTS_VOICE_MAP / TTS_VOICE_FALLBACK / TTS_TIMEOUT_MS / TTS_LEAD_MS / TTS_MAX_TEMPO / TTS_BGM_VOLUME`。
+
+**验证**
+- `dialogue.test.ts` 15 个用例（多角色连排、无台词描述、画外音、动作提示、裸文本、镜头说明冒号、音色稳定性、语气影响）。
+- 后端测试 28 个全通过，`tsc --noEmit` 0 错误。
+- 用 project-23 的真实 6 个镜头与台词重跑合成：34.3 秒（原 31 秒，长台词镜头各延长 0.4–1.1 秒），4/6 镜头带配音，人声区 mean −24.9dB / 峰值 −8.1dB，无台词镜头保留原环境声，句间停顿 0.5–0.7 秒，抽帧无黑边无花屏。旧成片备份为 `final-novoice-backup.mp4`。
+
+**已知限制**
+- 逐镜头独立配音再拼接，不跨镜头做整体音量归一，镜头间响度会有差异（原片环境声音量本身从 −53dB 到 −13dB 不等）。
+- 无台词镜头保留原声，若原声本身接近静音（如镜头 1 的 −53dB），观感上会是「默片段」。
+- 字幕只生成 `.srt` 外挂文件，未烧进画面（避免中文字体缺失），前端也还没有字幕显示 UI。
