@@ -1,5 +1,8 @@
 /**
  * Universes API — shared IP management, character sharing, cross-project sync.
+ *
+ * 【已下线】后端未实现 `universes` 模块，本文件的请求在运行时一律 404。
+ * 仅被已下线的 UniversesPage / UniverseDetailPage 引用，恢复前请先补齐后端。
  */
 import { fetchApi } from "./client";
 import type {

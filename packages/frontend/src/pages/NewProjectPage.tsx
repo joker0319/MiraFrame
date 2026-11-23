@@ -4,11 +4,10 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { projectsApi } from "@/services/projectsApi";
-import { universesApi } from "@/services/universesApi";
 import { styleTemplatesApi } from "@/services/styleTemplatesApi";
 import { cn } from "@/lib/utils";
 import { BRAND } from "@/lib/brand";
-import { ArrowLeft, Check, Sparkles } from "lucide-react";
+import { ArrowLeft, Check } from "lucide-react";
 import type { CreateProjectPayload, ProjectProviderOverridesPayload } from "@/types";
 
 type ProviderKey = string | null;
@@ -20,7 +19,6 @@ interface FormData {
   text_provider_override: ProviderKey;
   image_provider_override: ProviderKey;
   video_provider_override: ProviderKey;
-  universe_id: number | null;
 }
 
 const STYLES: { slug: string; label: string; category: string }[] = [
@@ -63,12 +61,6 @@ export default function NewProjectPage() {
     text_provider_override: null,
     image_provider_override: null,
     video_provider_override: null,
-    universe_id: null,
-  });
-
-  const { data: universes } = useQuery({
-    queryKey: ["universes"],
-    queryFn: () => universesApi.list(),
   });
 
   const { data: styleTemplates } = useQuery({
@@ -90,16 +82,21 @@ export default function NewProjectPage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="flex items-center justify-between px-4 h-12 border-b border-base-300 bg-base-100">
-        <Link to="/" className="text-sm text-muted-foreground hover:text-base-content flex items-center gap-1">
-          <ArrowLeft className="h-4 w-4" />
+      <header className="flex items-center justify-between px-4 h-12 border-b border-line bg-paper">
+        <Link to="/" className="text-[12.5px] text-ink-3 hover:text-ink-1 flex items-center gap-1.5 transition-colors duration-150">
+          <ArrowLeft className="h-4 w-4" strokeWidth={1.7} />
           返回
         </Link>
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Sparkles className="h-4 w-4" />
+        <div className="flex items-center gap-2.5">
+          <span
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[3px] font-serif text-[15px] leading-none text-primary"
+            style={{ boxShadow: "inset 0 0 0 1.5px var(--color-primary)" }}
+            aria-hidden="true"
+          >
+            弥
           </span>
-          {BRAND.name}
+          <span className="text-[13.5px] font-semibold text-ink-1">{BRAND.name}</span>
+          <span className="font-serif text-[13px] text-ink-3">{BRAND.cnName}</span>
         </div>
       </header>
 
@@ -110,13 +107,13 @@ export default function NewProjectPage() {
             <div key={s} className="flex items-center gap-2">
               <div
                 className={cn(
-                  "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold",
-                  step > s ? "bg-success text-success-content" : step === s ? "bg-primary text-primary-foreground" : "bg-base-300 text-muted-foreground",
+                  "w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-medium",
+                  step > s ? "bg-success text-success-content" : step === s ? "bg-primary text-primary-foreground" : "bg-base-300 text-ink-3",
                 )}
               >
                 {step > s ? <Check className="h-4 w-4" /> : s}
               </div>
-              {s < 3 && <div className={cn("w-8 h-0.5", step > s ? "bg-success" : "bg-base-300")} />}
+              {s < 3 && <div className={cn("w-8 h-px", step > s ? "bg-success" : "bg-line")} />}
             </div>
           ))}
         </div>
@@ -124,7 +121,7 @@ export default function NewProjectPage() {
         {/* Step 1: Story */}
         {step === 1 && (
           <div className="card p-6 space-y-4">
-            <h2 className="text-xl font-bold">故事</h2>
+            <h2 className="font-serif text-[19px] font-medium tracking-[-0.02em] text-ink-1">故事</h2>
             <div>
               <label className="text-sm font-medium block mb-1">项目标题 *</label>
               <input
@@ -144,22 +141,6 @@ export default function NewProjectPage() {
                 onChange={(e) => updateForm({ story: e.target.value })}
               />
             </div>
-            <div>
-              <label className="text-sm font-medium block mb-1">关联宇宙（可选）</label>
-              <select
-                className="select"
-                value={form.universe_id ?? ""}
-                onChange={(e) => updateForm({ universe_id: e.target.value ? parseInt(e.target.value) : null })}
-              >
-                <option value="">不关联宇宙</option>
-                {universes?.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.projects_count} 章 / {u.shared_characters_count} 角色)
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground mt-1">选择宇宙后，角色会自动从共享角色库导入</p>
-            </div>
             <button
               onClick={() => setStep(2)}
               disabled={!form.title.trim()}
@@ -173,23 +154,24 @@ export default function NewProjectPage() {
         {/* Step 2: Style */}
         {step === 2 && (
           <div className="card p-6 space-y-6">
-            <h2 className="text-xl font-bold">风格</h2>
+            <h2 className="font-serif text-[19px] font-medium tracking-[-0.02em] text-ink-1">风格</h2>
 
             {/* Style templates */}
             <div className="space-y-4">
               {categories.map((category) => (
                 <div key={category}>
-                  <p className="text-xs text-muted-foreground mb-2">{category}</p>
+                  <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-4">{category}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {STYLES.filter((s) => s.category === category).map((s) => (
                       <button
                         key={s.slug}
                         onClick={() => updateForm({ style: s.slug })}
+                        aria-pressed={form.style === s.slug}
                         className={cn(
-                          "px-3 py-1.5 text-sm rounded-full border transition-all",
+                          "px-3 py-1.5 text-[12.5px] rounded transition-[box-shadow,color] duration-150",
                           form.style === s.slug
-                          ? "bg-primary text-primary-foreground border-primary shadow-md -translate-y-0.5"
-                            : "bg-base-100 border-base-300 hover:border-primary/50",
+                            ? "bg-primary text-primary-foreground shadow-[inset_0_0_0_1px_var(--color-primary)]"
+                            : "bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)] hover:text-ink-1 hover:shadow-[inset_0_0_0_1px_var(--color-ink-4)]",
                         )}
                       >
                         {s.label}
@@ -202,10 +184,10 @@ export default function NewProjectPage() {
 
             {/* Provider overrides */}
             <div className="space-y-3">
-              <h3 className="text-sm font-medium">服务商覆盖（可选）</h3>
+              <h3 className="text-[12.5px] font-medium text-ink-2">服务商覆盖（可选）</h3>
               {(["text", "image", "video"] as const).map((modality) => (
                 <div key={modality}>
-                  <label className="text-xs font-medium capitalize block mb-1">
+                  <label className="mb-1 block text-[11.5px] text-ink-3">
                     {modality === "text" ? "文本生成" : modality === "image" ? "图像生成" : "视频生成"}
                   </label>
                   <div className="flex flex-wrap gap-1">
@@ -217,10 +199,10 @@ export default function NewProjectPage() {
                           updateForm({ [key]: opt === "inherit-default" ? null : opt } as Partial<FormData>);
                         }}
                         className={cn(
-                          "px-2 py-1 text-xs rounded border transition-colors",
+                          "px-2 py-1 text-[11.5px] rounded transition-[box-shadow,color] duration-150",
                           (form[`${modality}_provider_override` as keyof FormData] ?? null) === (opt === "inherit-default" ? null : opt)
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-base-200 border-base-300 hover:border-primary/50",
+                            ? "bg-primary text-primary-foreground shadow-[inset_0_0_0_1px_var(--color-primary)]"
+                            : "bg-base-200 text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)] hover:text-ink-1",
                         )}
                       >
                         {getProviderLabel(opt)}
@@ -249,7 +231,6 @@ export default function NewProjectPage() {
             <div className="space-y-2">
               <h3 className="text-lg font-bold">{form.title || "未命名项目"}</h3>
               <span className="badge badge-primary badge-sm">{form.style}</span>
-              {form.universe_id && <span className="badge badge-outline badge-sm ml-2">宇宙 #{form.universe_id}</span>}
               {form.story && <p className="text-sm text-muted-foreground line-clamp-4 mt-2">{form.story}</p>}
             </div>
 

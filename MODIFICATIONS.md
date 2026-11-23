@@ -71,3 +71,187 @@ MiraFrame 是一个全 TypeScript 的 AI 漫剧生成项目：从故事想法出
 - 本次提交 51 个文件，+5559 / -588 行。
 - `.gitignore` 新增排除运行时导出的图片/视频产物（`packages/server/static/exports/`、`videos/`）。
 - 移除了历史中一个早期遗留、指向旧项目数据库的失效 CI 配置。
+
+---
+
+## 补充：接入真实推理模型（Kimi k3）的兼容性修复
+
+**背景**：默认 `.env` 用 `TEXT_PROVIDER=fake`，`generateFakeResponse()` 返回写死的「雨夜星灯」样本，**完全忽略用户输入**——因此输入任何提示词产物都一样。要真正让提示词生效必须接真实模型。
+
+**接入 Kimi（Moonshot AI，OpenAI 兼容接口）的配置**：
+
+```
+TEXT_PROVIDER=openai
+TEXT_BASE_URL=https://api.moonshot.cn/v1
+TEXT_API_KEY=<你的真实 key>
+TEXT_MODEL=kimi-k3
+TEXT_ENDPOINT=/chat/completions
+```
+
+**踩过的三个坑与修复**（都已做成可配置项，对其他模型无副作用）：
+
+1. **temperature 必须为 1**：kimi-k3 是推理模型，代码默认传 `0.7` 会报 400 `only 1 is allowed`。
+   → 新增 `TEXT_FORCE_TEMPERATURE=1`，`generate()` 与 `generateWithTools()` 都用它覆盖 options。
+
+2. **思考吃光 token 导致工具调用拿不到**：纯推理模式下 2500 tokens 全被 `reasoning_content` 消耗，`finish_reason=length`， tool_calls 为空，大纲阶段反复重试。
+   → 新增 `TEXT_REASONING_EFFORT=low`（可选，不设置则不传该字段）。开启后 reasoning tokens 从 ~2500 降到 ~27，Function Calling 正常返回合法 JSON 参数。
+
+3. **120s 超时不够**：推理模型生成角色 JSON 超过 120 秒触发 `AbortSignal.timeout`。
+   → 新增 `TEXT_TIMEOUT_MS=300000`，替换两处硬编码的 120_000。
+
+4. **429 限流**：该 Kimi 账号并发上限 1、RPM 上限 3，流水线/脚本连续请求会返回 429 `rate_limit_reached_error`，原先直接抛错中断生成。
+   → `TextService` 新增带指数退避的 429 自动重试（优先读 `Retry-After` 头或错误信息里的建议秒数，加随机抖动），配置项 `TEXT_MAX_RETRIES=6`、`TEXT_RETRY_BASE_MS=1000`。
+   → 新增进程级请求串行队列 `requestQueue`：所有 LLM 请求任一时刻只发一个，从源头消除"并发超限"型 429，重试只处理偶发 RPM 频率限制。网络层错误也一并重试。
+   → `generateWithTools()` 里 429 重试耗尽后抛明确错误，不再误判为 `TOOLS_UNSUPPORTED` 去降级 JSON（降级只会再撞一次限流）。
+
+**验证**：用「纸鸢引」提示词端到端跑通全部 6 阶段，状态 `succeeded`，产出角色「阿鸢 / 阿满 / 鸢婆婆 / 陈阿婆」、6 个分镜、成片 mp4——产物全部来自输入，不再是 fake 样本。另做了并发压测：同时发起 5 个请求，串行队列 + 自动重试后 5 个全部成功。两包 typecheck 通过。
+
+## 补充：接入真实图像 / 视频生成（阿里云百炼 DashScope）
+
+**背景**：接上 Kimi 后文本真实生成了，但 `IMAGE_PROVIDER=fake` / `VIDEO_PROVIDER=fake` 导致镜头图片返回固定 URL、镜头视频全部返回同一个 `dev_clip.mp4`，成片只是把这段固定素材拼接——用户看到"镜头都一样、成片是旧的"。
+
+**探测结论**（_key 为百炼 `sk-ws-` 格式，与 Kimi `sk-ms-` 不同，是两家服务_）：
+- 图像 `qwen-image-3.0`：可用，DashScope 原生 `multimodal-generation/generation` 接口返回真实图片 URL（项目 `image.service.ts` 用的正是此格式）。
+- 视频：`wan2.7-t2v` 未开通（`AccessDenied.Unpurchased`）；`wan2.6-t2v` / `wan2.6-i2v` / `wan2.5-t2v-preview` / `wanx2.1-t2v-turbo` 已开通。项目流水线是"先出首帧图再图生视频"，故选 `wan2.6-i2v`。
+- `wan2.6-t2v` 异步任务实测约 60 秒 `SUCCEEDED` 并返回真实视频 URL，接口格式与 `video.service.ts` 一致（`X-DashScope-Async: enable` + `output.video_url`）。
+
+**配置改动**（仅 `.env`，代码无需改）：
+```
+IMAGE_PROVIDER=openai
+IMAGE_MODEL=qwen-image-3.0
+IMAGE_API_KEY=<百炼 key>
+VIDEO_PROVIDER=openai
+VIDEO_MODEL=wan2.6-i2v
+VIDEO_API_KEY=<百炼 key>
+VIDEO_MODE=image
+```
+
+**遗留（账户问题，非代码问题）**：端到端验证时图像阶段返回 `Arrearage: Access denied, please make sure your account is in good standing`——该百炼账户在验证过程中额度耗尽 / 欠费，生成类接口被拒（模型列表等非计费接口仍可访问）。需在阿里云百炼控制台充值或确认账户状态后，配置即可直接生效，无需改代码。
+
+**注意**：LLM 请求已在客户端串行化并带 429 退避重试，密集请求仍会因 Kimi RPM 上限产生累计等待，属预期行为。
+
+**费用教训**：为探测"哪个视频模型已开通"，用真实提交生成任务的方式循环试了 5 个模型，全部成功执行并按量扣费（约 ¥17–27）。正确做法应是只读查询开通状态，不提交真实生成任务。任何付费服务的连通性/可用性探测，必须先只读，且真正生成前告知用户镜头数与预估成本。
+
+## 补充：切换到 Agnes AI 免费方案（文本 + 图像 + 视频全免费）
+
+**背景**：百炼账户欠费后不能再生成，用户要求换免费模型。选用 Agnes AI（`api.agnes-ai.cn`，国内直连、OpenAI 兼容、三个模型均免费）。
+
+**探测结论**（只读列模型 + 各提交 1 个最小任务验证，不再批量提交）：
+- 域名：国内站 `https://api.agnes-ai.cn/v1` 有效（国际站 `apihub.agnes-ai.com` key 无效）。
+- 文本 `agnes-3.0-flash`：`/chat/completions`，普通模型（非推理），temperature 0.7 可用，Function Calling 返回合法 JSON 参数——项目代码无需改。
+- 图像 `agnes-image-2.5-flash`：`/images/generations`，返回 `data[0].url`（国内 COS 域名，可下载）——项目 OpenAI 兼容分支直接可用，无需改。
+- 视频 `agnes-video-2.5-flash`：`POST /videos` 返回 `video_id`，轮询域名根路径 `/agnesapi?video_id=&model_name=`，状态 `completed` 时返回顶层 `url` 字段（国内 COS，可下载）。图生视频用 `mode=keyframe` + `first_frame=<图片URL>`。
+
+**配置改动**（`.env`）：
+```
+TEXT_BASE_URL=https://api.agnes-ai.cn/v1
+TEXT_MODEL=agnes-3.0-flash
+TEXT_FORCE_TEMPERATURE=      # 清空：Agnes 非推理模型，无需强制 temperature
+TEXT_REASONING_EFFORT=       # 清空：不传该字段
+IMAGE_BASE_URL=https://api.agnes-ai.cn/v1
+IMAGE_MODEL=agnes-image-2.5-flash
+IMAGE_ENDPOINT=/images/generations
+VIDEO_BASE_URL=https://api.agnes-ai.cn/v1
+VIDEO_MODEL=agnes-video-2.5-flash
+VIDEO_ENDPOINT=
+VIDEO_TIMEOUT_MS=300000
+```
+
+**代码改动**（`video.service.ts`）：新增 Agnes 视频分支 `generateAgnesVideo()` + `pollAgnesVideo()`——`baseUrl` 含 `agnes` 时走 `POST /v1/videos`（body: model/prompt/mode/seconds/size/aspect_ratio/first_frame），再用 `video_id` 轮询 `/agnesapi`。`config/app.config.ts` 新增 `videoTimeoutMs` 配置项。
+
+**验证**：2 镜头「纸鸢引」端到端跑通，`status: completed`——文本大纲「晨光纸香」、2 张各不相同的首帧图、2 段各不相同的视频（task_R7LCq8… / task_7CeSHl…）、成片 `final.mp4`（1.6MB，HTTP 200）。关键成果：镜头画面与成片不再是固定旧素材，全部按提示词真实生成。两包 typecheck 通过。
+
+**注意**：Agnes 免费视频有限流（约 1 次/分钟），多镜头生成时任务会在服务端排队，属正常；免费政策可能调整，以官网为准。
+
+### 修复：第 5、6 镜头视频生成失败（503 队列满）
+
+**现象**：6 镜头项目只有前 4 个镜头出视频，第 5、6 个失败，重试多次仍失败，报 `镜头视频生成失败：镜头 5、6`。
+
+**根因**：Agnes 免费视频有队列上限，连续提交多个镜头任务时服务端返回 `HTTP 503 {"code":"video_queue_full"}`。`generateAgnesVideo()` 原先遇到非 200 直接抛错、无任何重试；一旦某个镜头撞上队列满就中断整条流程。重试时已成功的镜头会被跳过（增量），但 5、6 仍会立刻撞上尚未清空的队列。
+
+**修复**（`video.service.ts` + `config/app.config.ts` + `.env`）：
+- `generateAgnesVideo()` 提交任务改为带重试的循环：503 / 429 / 502 / 504 或错误体含 `queue_full`/`队列已满`/`rate limit` 时自动重试。
+- 退避策略：优先读 `Retry-After` 头，否则 `2^n` 指数（基础 8s，封顶 120s）再加 0–3s 随机抖动，避免多镜头同时重试再次撞满。
+- 新增配置 `VIDEO_MAX_RETRIES=8`、`VIDEO_RETRY_BASE_MS=8000`。
+- 非重试类错误（如 401、400）仍立即抛出，不浪费时间。
+
+**验证**：项目 23 用 `target_stage=render_shot_images` 续跑（复用已有图片和前 4 个视频），日志出现 `[AgnesVideo] 提交被限流/队列满 (HTTP 503)，9s 后重试 (1/8)`，重试后镜头 5、6 均成功，`status: succeeded`，成片 `final.mp4`（4.4MB，HTTP 200）重新合成完成。typecheck 通过。
+
+## 前端视觉重设计：纸墨设计系统
+
+**动机**：旧视觉是典型的"AI 味"——蓝色主色 `#2563eb` + teal 副色、外链 Google Fonts 的 `ZCOOL KuaiLe` 卡通字体、圆点点阵背景、重投影 + 大圆角。用户明确表示不满意。
+
+**方案**：改为「纸墨」体系，结构固定为「中性底 + 单一品牌点缀 + 三个语义色」。
+
+**页面分类（同一套原理、两套强度）**
+- A 类首页 `HomePage`：承担气质，允许氛围层与一次性入场。
+- B 类 `ProjectsPage` / `ProjectPage` / `NewProjectPage` / `UniversesPage` / `UniverseDetailPage`：效率优先，零渐变、零光斑、零逐字动画，仅保留 ≤150ms 交互反馈。
+
+**token（集中在 `src/styles/globals.css` 的 `@theme`，组件只引用语义类）**
+
+| 类别 | 浅色（纸墨） | 深色（墨夜） |
+|---|---|---|
+| 页面底 | `#fcfbf8` | `#16150f` |
+| 卡片面 | `#ffffff` | `#1c1b15` |
+| 文字四级 | `#191917 / #54514a / #8b877c / #a9a49a` | `#f1eee4 / #c6c1b3 / #948f80 / #706b5d` |
+| 描边 | `#e6e3da` / `#efede6` | `#333027` / `#282519` |
+| 品牌 | `#8c1d2f`（深红，仅点缀） | `#c9576b` |
+| 语义色 | error `#a12d24` / warning `#9a6f1c` / success `#3f6b4a` | 对应提亮值 |
+| 字体 | 系统栈：PingFang SC / 思源宋体 / SF Mono | 同 |
+| 主缓动 | `cubic-bezier(.22,1,.36,1)`，全站唯一 | 同 |
+
+**关键做法**
+- 删除 Google Fonts 外链与卡通字体，全部改系统栈（零外部资源）。
+- 卡片用 `box-shadow: inset 0 0 0 1px` 做 ring 描边，不占布局宽度。
+- 蓝色/青色/圆点点阵/重阴影全部替换为纸墨描边与语义色 tint。
+- 风格选择器从 14 组彩色渐变改为「真实封面图（低饱和）+ 极小代表色点」，保留具体信息、去掉装饰。
+- 工作台节点卡取消交错布局与手绘 SVG 连接线，改用 `01–05` 等宽编号表达顺序（更可靠、更少视觉噪音）。
+
+**动效安全（A 类）**
+- 元素默认可见；隐藏起始态只挂在 `[data-run='true'] .rise` 下。
+- 挂载时置 `data-run=true`，`setTimeout` 1.4s 后移除，DOM 回到纯静态。
+- `prefers-reduced-motion: reduce` 时隐藏态不生效，元素立即可见；全局另有 `animation-duration: .001ms` 兜底。
+- 已用 headless Chrome 在 3.2s 后截图验证：内容完整可见，无白屏。
+
+**验证**：`tsc --noEmit` 通过；`vite build` 通过（CSS 58.99 kB / gzip 11.18 kB）；浅色与深色（`data-theme=dark`）均截图核对，无白块残留、无对比度不足。业务逻辑与 API 调用未改动。
+
+## 视觉重设计 · 收尾轮（未迁移界面 / 暗色主色 / 短缺口）
+
+**背景**：首轮重设计覆盖了五大页面，但 `UniverseDetailPage`、`NodeDetail`、`SettingsDialog`、chat 组件仍是旧 DaisyUI 语汇（emoji 标题、`rounded-2xl`、`shadow-2xl`、`bg-primary/5` 色块），与纸墨系统不一致。
+
+**本轮改动**
+- `globals.css`
+  - 补 `@utility btn-error` / `btn-success`（`NodeDetail` 里 3 处在用但从未定义，属真空缺），改为描边+浅 tint，不抢主按钮。
+  - 新增 `--color-primary-fill` / `--color-primary-fill-foreground`：实心填充与「文字用主色」解耦。
+  - 暗色 `--color-primary` 由 `#c9576b`（偏粉）调为 `#d4747f`（仅作文字/描边点缀），实心填充用 `#9c2e3c` + 米白文字 `#fbf6ef`。修掉暗色下主按钮变「亮粉块」的问题，同时保证文字对比度。
+  - `btn-primary` / `checkbox:checked` 改用 fill token。
+- `UniverseDetailPage`：整页重写（业务逻辑、API 调用未动）。去 emoji，改 lucide 图标；去掉重复的返回链接；标题区改 eyebrow + 衬线 h1 + 等宽计数；章节列表改 `01–04` 等宽编号行 + hover 才出现的删除按钮；世界观/风格规则改为标签 + 正文块；共享角色卡改 4:3 图位 + 衬线名字 + 描边标签 + 等宽版本号；弹窗改 `bg-black/35` + card + 无 `shadow-2xl`。
+- `NodeDetail`：31 处旧类名归一（`text-muted-foreground`→`ink-3`、`border-base-200`→`line-soft`）；面板/卡片统一 `rounded-[6px]` + inset ring 描边；标题改 14px medium + 等宽 metric；角色/分镜卡、大纲预览改 eyebrow 标签 + 12.5px 正文；错误块改用 `error-tint` + tint 描边；删除 `btn-outline btn-error` 叠加（改单一 `btn-error`）。
+- `SettingsDialog`：容器改 `bg-paper` + `ring-line` + 柔和投影；左栏 active 态改白面 + 描边；测试结果块改 tint + tint 描边；字段卡改 inset ring + 等宽 `source`。
+- `ChatPanel` / `ChatDrawer` / `MessageInput` / `MessageList` / `OutlinePreviewCard`：emoji（🎬🎨💡）换成 `Film`/`Palette`/`Lightbulb`；气泡改 `rounded-[6px]`、用户侧用 5.5% 品牌 tint + 12% 描边；结构化输出卡头改 tint 底色 + 11px 副标；大纲预览卡改 10% 等宽 eyebrow。
+- `ui/modal.tsx`：`bg-black/50`→`/35`、`rounded-2xl`→`rounded-[8px]`、`shadow-lg`→显式柔和投影 + ring；标题改衬线。
+
+**验证**
+- `tsc --noEmit` 0 错误；`vite build` 通过（UniverseDetailPage 9.60 kB / gzip 3.14 kB）。
+- 截图核对：首页、项目列表、工作台、宇宙列表、宇宙详情（浅色 + 墨夜）、设置弹窗。
+- 宇宙详情页数据用 CDP `Fetch` 拦截 mock 注入（含 OPTIONS 预检），因为后端无该接口，见下。
+
+**发现（未修，待确认）**
+- 后端只有 `config` / `projects` / `characters` / `shots` / `generation` 五个模块，**没有 universes 接口**，`db/schema.ts` 也没有 universes / shared_characters 表（仅 projects 上留了 `universe_id` 列）。
+- 因此 `/universes` 与 `/universes/:id` 实际永远是空状态/「宇宙未找到」，IP 宇宙是纯前端空壳。已如实告知用户，未擅自实现后端。
+
+## IP 宇宙下线（止血）
+
+**决策**：后端从来没实现 universes 模块（只有 config / projects / characters / shots / generation），`db/schema.ts` 里也没有 universes / shared_characters 表，只在 projects 上留了个没人用的 `universe_id` 列。前端 `/universes` 与 `/universes/:id` 因此永远是空状态 /「宇宙未找到」，新建页还有个必然 404 的「关联宇宙」下拉。选「先下线、想清楚产品形态再建表」，避免点进去就是坏页面。
+
+**改动**
+- `App.tsx`：删除 `UniversesPage` / `UniverseDetailPage` 的 lazy import 与两条路由；`/universes` 和 `/universes/*` 改为 `<Navigate to="/projects" replace />`；新增 `<Route path="*">` → 首页兜底（原来未知路径是白屏）。
+- `NewProjectPage.tsx`：移除 `universesApi` import、`FormData.universe_id`、`useQuery(["universes"])`、第一步的「关联宇宙（可选）」下拉及其说明文案、第三步的「宇宙 #id」徽标。创建 payload 不再携带 `universe_id`（后端默认 null）。
+- `UniversesPage.tsx` / `UniverseDetailPage.tsx` / `services/universesApi.ts`：文件保留作设计留档，顶部加「已下线」注释说明原因与恢复前提，不再被任何路由引用。
+- `types/index.ts` 的 `Universe*` 类型、`projectStore` / `useWebSocket` 的 `universe_id` 同步字段保留（后端 projects 表确有该列，删了反而要对齐 WS 协议）。
+
+**验证**
+- `tsc --noEmit` 0 错误；`vite build` 通过，产物中已无 UniversesPage / UniverseDetailPage chunk。
+- CDP 实测：`/universes` → `/projects`、`/universes/1` → `/projects`、`/this-does-not-exist` → `/`，页面内均无「宇宙」字样；`/project/new` 第一步只剩「项目标题 / 故事内容」，布局无空洞。
+
+**恢复前提（备忘）**：需先补 `universes` / `universe_projects` / `shared_characters` 三表 + 模块 + 接口，再接回两个页面与 TopBar 入口；核心待定问题是「跨项目角色一致性与复用」的产品规则。
