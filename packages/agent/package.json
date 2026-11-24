@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean --tsconfig tsconfig.build.json",
+    "build": "tsup src/index.ts --format esm --dts --clean --tsconfig tsconfig.build.json && node scripts/copy-mcp-servers.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

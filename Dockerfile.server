@@ -29,4 +29,9 @@ COPY --from=base /app/packages/server/dist ./packages/server/dist
 COPY --from=base /app/packages/server/package.json ./packages/server/
 
 EXPOSE 3000
+
+# 生产镜像不带项目源码（只有 dist），素材库 MCP server 没有可暴露的文件，
+# 显式关闭避免每个 job 白起一个子进程再降级。
+ENV MIRAFRAME_MCP_ASSETS=0
+
 CMD ["node", "packages/server/dist/main.js"]

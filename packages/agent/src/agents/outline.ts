@@ -2,6 +2,7 @@ import { BaseAgent, type AgentContext } from "./base.js";
 import type { Phase2StateType } from "../state.js";
 import { OUTLINE_FEEDBACK_PROMPT, OUTLINE_SYSTEM_PROMPT } from "../prompts/outline.js";
 import { createOutlineToolKit, runToolLoop } from "../tools/index.js";
+import { createAssetsToolKit } from "../tools/mcp/index.js";
 
 export class OutlineAgent extends BaseAgent {
   constructor() {
@@ -19,22 +20,47 @@ export class OutlineAgent extends BaseAgent {
       : "请根据提供的故事创想生成一份详细的故事大纲。必须全部使用中文输出。";
 
     const toolkit = createOutlineToolKit(ctx);
-    const loop = await runToolLoop({
-      ctx,
-      registry: toolkit.registry,
-      system: OUTLINE_SYSTEM_PROMPT,
-      user: userPrompt,
-      intent: "outline",
-      maxRounds: 6,
-      onCall: async (call, result) => {
-        await this.sendThinking(
-          ctx,
-          "decision",
-          `模型决定调用工具 ${call.name}`,
-          result.substring(0, 300),
-        );
-      },
-    });
+
+    // MCP 素材库工具是可选增强：拉不起子进程就直接跳过，大纲生成照常进行。
+    // 注册进同一个 registry 后，模型能在写大纲前自主查看项目里真实存在的参考素材。
+    const assets = await createAssetsToolKit();
+    if (assets) {
+      for (const tool of assets.tools) {
+        if (toolkit.registry.has(tool.definition.name)) {
+          console.warn(`[OutlineAgent] MCP 工具 ${tool.definition.name} 与本地工具重名，保留本地实现`);
+          continue;
+        }
+        try {
+          toolkit.registry.register(tool);
+        } catch (error) {
+          console.warn(
+            `[OutlineAgent] MCP 工具注册失败：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
+
+    let loop: Awaited<ReturnType<typeof runToolLoop>>;
+    try {
+      loop = await runToolLoop({
+        ctx,
+        registry: toolkit.registry,
+        system: OUTLINE_SYSTEM_PROMPT,
+        user: userPrompt,
+        intent: "outline",
+        maxRounds: 6,
+        onCall: async (call, result) => {
+          await this.sendThinking(
+            ctx,
+            "decision",
+            `模型决定调用工具 ${call.name}`,
+            result.substring(0, 300),
+          );
+        },
+      });
+    } finally {
+      await assets?.close();
+    }
 
     // 模型通过工具落库；若它没遵守协议直接返回了大纲 JSON，保留旧的兜底解析路径
     let storyOutline = toolkit.getSavedOutline();
