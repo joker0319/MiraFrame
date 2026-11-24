@@ -400,3 +400,36 @@ VIDEO_TIMEOUT_MS=300000
 **为什么不是所有共享都要清**：模块级共享只剩两类——Agent 实例（`BaseAgent` 只有 `readonly name`，无状态）和 `checkpointer` 单例（内部 pg 连接池，本来就该复用，且不持有项目上下文）。这两者共享是正确设计，与「用全局变量传请求上下文」是两回事，面试时可以明确区分。
 
 **验证**：全仓 **190 个测试全过**（shared 60 / agent 48 / server 72 / frontend 10），`pnpm build`、`pnpm typecheck` 均通过。真实双项目并发生成未实测（要跑两次完整生成），但单元级 8 路并发已覆盖上下文隔离语义。
+
+---
+
+## P1-3 工具层统一 + MCP：从「硬编码方法」到「可插拔工具」
+
+**动机**：工具层原本只覆盖大纲节点，协议是自研 JSON Schema，和 LangChain 生态不通；MCP 是六大考点里最明确的一条空白。旧路线图的验收标准只有一句：**至少一个 Agent 通过 MCP 工具完成一次真实调用，工具清单可枚举。**
+
+**先解决一个硬约束**：这个工作区里 `pnpm install` 必然失败（WorkBuddy 文件代理拦截 `node_modules` 内的 rename/unlink），所以**不能新增依赖** —— `@langchain/mcp-adapters` 用不了。两条替代路径都验证可行后选了后者：
+- `tool()` / `DynamicStructuredTool` 实测接受**纯 JSON Schema**（不强制 zod），所以协议互通不需要装 zod；
+- MCP 的 stdio 传输本身很小（每行一个 JSON-RPC 消息），按规范自实现比引依赖更可控。
+
+**改动**
+
+- `tools/langchain-bridge.ts`（新）：`fromLangChainTool` / `toLangChainTool` / `toOpenAiToolSpec` 三向适配。刻意**拒绝 zod schema 并报错**而不是静默降级 —— 静默降级会让模型收到错误参数定义，比报错更难查。（`invoke` 参数必须用 `any`，用 `unknown` 会因函数参数逆变而无法接受 LangChain 的具体输入类型。）
+- `tools/mcp/client.ts`（新，~230 行零依赖）：JSON-RPC 2.0 over stdio 客户端。请求 id 递增配对、可配超时、子进程退出时 `failAll` 拒绝所有 pending、stdout 混入非协议内容记进诊断而不崩、`close()` 先关 stdin 再 1s 后 SIGKILL。实现了 `initialize` → `notifications/initialized` → `tools/list` → `tools/call`。
+- `tools/mcp/servers/assets-server.mjs`（新，零依赖）：真实可跑的 MCP server，暴露项目内文件。安全上做了两层：`resolve` 后校验必须在项目根内（防 `../` 穿越），以及拒绝 `node_modules`/`.git`/`dist` 与 `.env`/`*.pem`/`*.key` 类文件；读取默认 16KB、上限 64KB，二进制只在含 `\0` 时返回元数据。日志一律走 stderr（stdout 只能有协议消息）。
+- `tools/mcp/adapter.ts`（新）：远端描述符 → `AgentTool`，把 `isError` 转成 `ERROR:` 前缀，沿用本地工具的失败约定。
+- `tools/mcp/assets-toolkit.ts`（新）：连接 + 注册 + **失败即降级**。`findProjectRoot()` 向上找 `pnpm-workspace.yaml`/`.git`，支持 `MIRAFRAME_ROOT` / `MIRAFRAME_MCP_ASSETS_SERVER` 覆盖，`MIRAFRAME_MCP_ASSETS=0` 关闭。
+- `agents/outline.ts`：把 MCP 工具注册进大纲节点的同一个 `ToolRegistry`（与本地工具重名时保留本地实现），`finally` 里关闭子进程。模型因此能在写大纲前自主查项目里真实存在的参考素材。
+- `packages/agent/scripts/copy-mcp-servers.mjs`（新）：**tsup 是 bundle 模式，`.mjs` 子进程脚本不会进 dist**，而生产镜像「只拷 dist」，缺它则 `node dist` 形态下 MCP 永远降级。build 脚本末尾调用它复制。
+- `Dockerfile.server`：显式 `ENV MIRAFRAME_MCP_ASSETS=0` —— 生产镜像不带源码，素材库没有可暴露的文件，避免每个 job 白起一个子进程再降级。
+- `vitest.config.ts`（agent/server）：默认 `MIRAFRAME_MCP_ASSETS=0`，MCP 用例显式传 `enabled: true`。
+
+**验证**：全仓 **220 个测试全过**（shared 60 / agent 78 / server 72 / frontend 10），`pnpm build`、`pnpm typecheck` 通过。新增 20 个用例，分四层：
+
+| 层 | 文件 | 关键断言 |
+| --- | --- | --- |
+| 协议桥接 | `langchain-bridge.test.ts`（7） | `tool()` → AgentTool → 执行；往返转换后注册进 Registry 仍可执行；zod schema 被拒 |
+| MCP 客户端 | `mcp-client.test.ts`（10） | 真 spawn 子进程走完整往返；`tools/list` 缓存命中同一引用；越界路径与受限目录被拒；close 后拒绝新请求；脚本缺失时 reject 而非挂死 |
+| 工具层集成 | `mcp-toolkit.test.ts`（11） | `registry.names()` 可枚举；远端工具调用方式与本地一致；`ERROR:` 前缀约定；三条降级路径 |
+| 端到端闭环 | `mcp-tool-loop.test.ts`（2） | 预设 tool_calls 驱动真实 ToolLoop：模型先调 `list_project_assets` 查 docs，再写草稿落库；**断言第二轮上下文里出现了 `architecture-walkthrough.md`**，证明工具结果真的回填给了模型 |
+
+另外用 `node` 直接加载 `dist/index.js` 验证过构建产物形态：`serverInfo` 正确、工具清单可枚举、能列真实 `docs` 目录 —— 确认「复制脚本进 dist」这一步真的解决了问题。

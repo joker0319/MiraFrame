@@ -3,7 +3,7 @@
 > 数据截至 2026-11-24，代码基线 `82ae3d4`（42 个提交）。
 > 配套：[RESUME.md](./RESUME.md)（简历写法）、[INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md)（面试口述）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）。
 > 工期单位沿用 `multi-agent-upgrade-plan.md` 的「晚」（每天 2–3 小时）。
-> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理也已完成**，下方各节保留为实施记录与验收依据。当前待办：P1-3（工具层/MCP）、P1-5（前端测试扩充）。P1-5 已部分完成——前端用例从 4 个增加到 10 个。
+> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理、P1-3 工具层/MCP 也已完成**，下方各节保留为实施记录与验收依据。当前待办：P1-5（前端测试扩充）。P1-5 已部分完成——前端用例从 4 个增加到 10 个。
 
 ---
 
@@ -118,6 +118,8 @@
 - **简历升级**：LLM-as-Judge 从「代码里有」变成「演示看得见」，面试时能直接指屏幕讲。
 
 ### P1-3 工具层统一 + 接 MCP
+
+> **状态：已完成（2026-11-24）**。工具协议与 LangChain `tool()` 双向互通（`tools/langchain-bridge.ts`），MCP 按规范自实现 stdio 客户端（`tools/mcp/client.ts`，零新依赖），配套一个真实素材库 server（`tools/mcp/servers/assets-server.mjs`，暴露项目内真实文件、带路径穿越与敏感文件拦截）。大纲节点已把 MCP 工具注册进同一个 ToolRegistry，模型可自主调用；`ToolLoop × MCP` 集成测试用预设 tool_calls 验证了「模型决策 → 远端工具执行 → 结果回填 → 继续生成」的完整链路（含对真实目录内容的断言）。见 §MODIFICATIONS P1-3 一节。
 
 - **动机**：工具层已有但只覆盖大纲节点（`tools/registry.ts`、`loop.ts`、`outline-tools.ts`），且是自研 JSON Schema 协议；`base.ts:22-47` 的硬编码 `AgentContext` 仍在。MCP 是热词，也是六大考点里最明确的一条短板。
 - **动作**：把 `ToolRegistry` 对齐 LangChain `tool()` 协议，把 `saveOutline` 等硬编码方法迁成注册工具；接 `@langchain/mcp-adapters` 挂一个真实外部 server（如文件系统或素材库），`registry.ts:9-10` 的注释就能兑现。
