@@ -1,8 +1,28 @@
 import { describe, it, expect } from "vitest";
-import { MemorySaver } from "@langchain/langgraph";
+import { MemorySaver, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { buildPhase2Graph } from "../graph.js";
-import { routeAfterCritique } from "../nodes/index.js";
+import { routeAfterCritique, runWithNodeContext } from "../nodes/index.js";
+import type { AgentContext } from "../agents/base.js";
 import { Phase2State } from "../state.js";
+
+/** 图执行时节点要从 ALS 取上下文，这里给一份最小可用的 fake context */
+function makeCtx(): AgentContext {
+  return {
+    projectId: 1,
+    runId: 1,
+    threadId: "thread-1",
+    sendMessage: async () => { void 0; },
+    sendThinking: async () => { void 0; },
+    callLlm: async () => "{}",
+    saveOutline: async () => { void 0; },
+    createCharacter: async () => ({ id: 1 }),
+    createShot: async () => ({ id: 1 }),
+    generateCharacterImage: async () => { void 0; },
+    generateShotFrames: async () => { void 0; },
+    generateShotVideos: async () => { void 0; },
+    composeProjectVideo: async () => { void 0; },
+  };
+}
 
 describe("Phase2 Graph", () => {
   it("builds a graph with all nodes", () => {
@@ -39,18 +59,17 @@ describe("Phase2 Graph", () => {
       reviewRequested: false,
     };
 
-    // Start execution - should hit interrupt at outline_approval
+    // Start execution - should hit interrupt at outline_approval.
+    // 上下文只能通过 ALS 传入：没有 runWithNodeContext 包裹时节点会直接抛错，
+    // 所以这里必须真的包一层，而不是靠 try/catch 把异常吞掉。
     const config = { configurable: { thread_id: "thread-1" } };
 
-    try {
-      await compiled.invoke(initialState, config);
-      // If we get here, no interrupt was raised (auto mode?)
-    } catch (e: unknown) {
-      // LangGraph may throw a specific Interrupt error
-      // This is expected behavior for human-in-the-loop nodes
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      expect(errorMessage).toBeDefined();
-    }
+    const result = await runWithNodeContext(makeCtx(), () => compiled.invoke(initialState, config));
+
+    expect(isInterrupted(result)).toBe(true);
+    const interrupts = (result as unknown as Record<string, unknown>)[INTERRUPT] as Array<{ value: unknown }>;
+    const interruptValue = interrupts[0].value as { gate?: string };
+    expect(interruptValue.gate).toBe("outline_approval");
   });
 
   it("has the expected nodes: director + 5 production + 4 approval + 1 review", () => {

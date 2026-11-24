@@ -17,7 +17,7 @@ export { ReviewRuleEngine } from "./agents/review.js";
 export * as nodes from "./nodes/index.js";
 
 // Context injection (called by Nest.js processor before graph execution)
-export { setNodeContext, clearNodeContext, runWithNodeContext } from "./nodes/index.js";
+export { runWithNodeContext } from "./nodes/index.js";
 
 // Prompts
 export * from "./prompts/index.js";

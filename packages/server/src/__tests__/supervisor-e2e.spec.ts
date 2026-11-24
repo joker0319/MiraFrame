@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { MemorySaver, Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
-import { buildPhase2Graph, setNodeContext, clearNodeContext, runWithNodeContext } from "@miraframe/agent";
+import { buildPhase2Graph, runWithNodeContext } from "@miraframe/agent";
 import type { AgentContext } from "@miraframe/agent";
 
 /**
@@ -47,27 +47,23 @@ describe("Supervisor 端到端：模型规划驱动整条流水线", () => {
       routeStage: null, routeMode: "full" as const, reviewRequested: false,
     };
 
-    setNodeContext(ctx);
-    try {
-      await runWithNodeContext(ctx, async () => {
-        let input: unknown = initialState;
-        let interrupted = 0;
-        for (let step = 0; step < 12; step++) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const result = await compiled.invoke(input as any, config);
-          if (isInterrupted(result)) {
-            interrupted++;
-            const iv = (result[INTERRUPT] as Array<{ value: unknown }>)?.[0]?.value as { gate?: string } | undefined;
-            events.push(`gate:${iv?.gate || "unknown"}`);
-            input = new Command({ resume: true });
-          } else {
-            break;
-          }
+    // 上下文只经 ALS 传递：并发 job 之间不会共享可变的全局对象
+    await runWithNodeContext(ctx, async () => {
+      let input: unknown = initialState;
+      let interrupted = 0;
+      for (let step = 0; step < 12; step++) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await compiled.invoke(input as any, config);
+        if (isInterrupted(result)) {
+          interrupted++;
+          const iv = (result[INTERRUPT] as Array<{ value: unknown }>)?.[0]?.value as { gate?: string } | undefined;
+          events.push(`gate:${iv?.gate || "unknown"}`);
+          input = new Command({ resume: true });
+        } else {
+          break;
         }
-      });
-    } finally {
-      clearNodeContext();
-    }
+      }
+    });
 
     // 计划里没有 plan_characters，所以角色图生成不应被调用
     expect(events).not.toContain("characters-image-called");

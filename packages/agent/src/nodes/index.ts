@@ -45,48 +45,30 @@ function nextEnabled(state: Phase2StateType, from: string): string {
   return "compose_videos";
 }
 
-// Module-scoped context — set by the Nest.js processor before graph execution.
-let _nodeCtx: AgentContext | null = null;
+/**
+ * 节点取上下文只有一个来源：AsyncLocalStorage。
+ *
+ * 早先这里还有一个模块级 `_nodeCtx` 兜底，配合 `setNodeContext()` 使用。
+ * 但 processor 的 BullMQ worker 是 `concurrency: 8`，全局变量会被后一个 job 覆盖，
+ * 于是 A 项目的节点可能拿着 B 项目的 ctx 去写库；更糟的是取不到时返回 mock ctx，
+ * `callLlm` 直接吐 `"{}"`，产物静默变空、任务还显示成功。
+ * 现在宁可显式报错，也不做静默降级。
+ */
 const nodeContextStorage = new AsyncLocalStorage<AgentContext>();
 
 export function runWithNodeContext<T>(ctx: AgentContext, fn: () => Promise<T>): Promise<T> {
   return nodeContextStorage.run(ctx, fn);
 }
 
-/** Call from the Nest.js AgentProcessor before invoking the graph. */
-export function setNodeContext(ctx: AgentContext): void {
-  _nodeCtx = ctx;
-  console.log(`[agent:ctx] Context set — project=${ctx.projectId} run=${ctx.runId}`);
-}
-
-/** Call after graph execution to clean up. */
-export function clearNodeContext(): void {
-  _nodeCtx = null;
-}
-
 function getNodeCtx(): AgentContext {
-  const storedCtx = nodeContextStorage.getStore();
-  if (storedCtx) return storedCtx;
-  if (_nodeCtx) return _nodeCtx;
-  console.warn("[agent:ctx] WARNING — using fallback mock context. Graph output will be empty!");
-  return {
-    projectId: 0,
-    runId: 0,
-    threadId: "",
-    sendMessage: async () => { void 0; },
-    sendThinking: async () => { void 0; },
-    callLlm: async () => {
-      console.warn("[agent:ctx] MOCK callLlm called — returning {}");
-      return "{}";
-    },
-    saveOutline: async () => { void 0; },
-    createCharacter: async () => ({ id: 0 }),
-    createShot: async () => ({ id: 0 }),
-    generateCharacterImage: async () => { void 0; },
-    generateShotFrames: async () => { void 0; },
-    generateShotVideos: async () => { void 0; },
-    composeProjectVideo: async () => { void 0; },
-  };
+  const ctx = nodeContextStorage.getStore();
+  if (!ctx) {
+    throw new Error(
+      "[agent:ctx] 图节点拿不到 AgentContext：图必须在 runWithNodeContext(ctx, ...) 作用域内执行。" +
+        "并发场景不提供全局兜底，以免多个 job 串号。",
+    );
+  }
+  return ctx;
 }
 
 // ── Director node (Supervisor) ──

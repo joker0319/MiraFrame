@@ -7,7 +7,7 @@ import { REDIS_CLIENT, REDIS_SUBSCRIBER } from "../redis";
 import { DRIZZLE, type Db } from "../db";
 import { WsGateway } from "../ws";
 import { ImageService, TextService, VideoService, ConsistencyService } from "../services";
-import { buildPhase2Graph, createCheckpointer, setNodeContext, clearNodeContext, runWithNodeContext } from "@miraframe/agent";
+import { buildPhase2Graph, createCheckpointer, runWithNodeContext } from "@miraframe/agent";
 import type { LlmChatMessage, ToolDefinition, CritiqueReport } from "@miraframe/agent";
 import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { and, asc, eq } from "drizzle-orm";
@@ -609,12 +609,10 @@ export class AgentProcessor extends WorkerHost {
 
 	    };
 
-    // Inject context so graph nodes can use it
-    setNodeContext(ctx);
-
     const initialState = buildInitialState(job.data);
 
     try {
+      // 只靠 ALS 传递上下文：同一 worker 并发跑多个 job 时各自独立，不共享可变全局。
       await runWithNodeContext(ctx, async () => {
       console.log(`[processor] Invoking graph with initial state...`);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -754,7 +752,6 @@ export class AgentProcessor extends WorkerHost {
       console.error(`[processor] Generation FAILED for run ${runId}:`, errorMessage);
       throw error;
     } finally {
-      clearNodeContext();
       console.log(`[processor] === Generation job finished (run=${runId}) ===`);
     }
   }
