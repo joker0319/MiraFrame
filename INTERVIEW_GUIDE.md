@@ -1,8 +1,8 @@
 # MiraFrame 面试叙事指南
 
-> 数据截至 2026-11-24，代码基线 commit `7037473`。
+> 数据截至 2026-11-24，代码基线 commit `82ae3d4`（共 42 个提交）。
 > 用法：先看「30 秒版本」建立总纲，再挑 2–3 个 STAR 案例深讲，最后用「诚实边界」主动交代局限。
-> 配套：[README.md](./README.md)（项目是什么）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）。
+> 配套：[README.md](./README.md)（项目是什么）、[RESUME.md](./RESUME.md)（简历怎么写）、[ROADMAP.md](./ROADMAP.md)（后续优化）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）。
 
 ---
 
@@ -23,7 +23,7 @@
 ### 结果数据（可引用）
 
 - 后端最近一次验证 **50 个测试全过**，前后端 `tsc` 0 错误，`vite build` 通过；源码中约 **149 个测试用例**分布在四个包。
-- 项目共 **41 个提交**；一致性相关三次提交 `dfbfcb0 → c5fc8f7 → 7037473` 对应「检测 → 自动接入流水线 → 反哺修正」三步演进。
+- 项目共 **42 个提交**（含文档提交）；一致性相关三次提交 `dfbfcb0 → c5fc8f7 → 7037473` 对应「检测 → 自动接入流水线 → 反哺修正」三步演进。
 - 真实运行：project-23 **6 镜头 / 3 角色**，一致性端到端 **1.85 秒**；续跑 run 51 结果 `ok=2 review=4 drift=0`。
 - i2i 反哺对照：沈鸢人脸距离从灰区约 **0.4 → 0.22**；临时项目端到端实测 **0.2562，判定 ok**。
 - 视频 503 场景：6 镜头项目原本只有 4 个出片，按 `target_stage=render_shot_images` 续跑后补齐，成片 **4.4MB**。
@@ -75,7 +75,7 @@
 **A**
 - `packages/agent/src/prompts/critic.ts:21-40`：四维 rubric（叙事、连贯性、镜头语言、可生成性），1–10 分，要求只返回 JSON，并给出「8+ 可发布 / 6–7 小修 / ≤5 重写」的评分指引。
 - `packages/agent/src/agents/critic.ts:21-35`：解析 JSON，兼容围栏、截取首尾 `{}`、字段缺失兜底；`:87-91` 调模型。
-- `:9-10` 阈值与轮次可配（`CRITIC_SCORE_THRESHOLD=7`、`CRITIC_MAX_ROUNDS=2`）；`:107` 通过条件是「达标 **或** 到轮次上限」，避免死循环。
+- `:9-10` 阈值与轮次可配（`CRITIC_SCORE_THRESHOLD` 默认 7、`CRITIC_MAX_ROUNDS` 默认 2）；`:107` 通过条件是「达标 **或** 到轮次上限」，避免死循环。注意 `.env` 里配的是 `CRITIQUE_SCORE_THRESHOLD=6.0`（另一套前缀，定义在 `config/app.config.ts:139-143` 且无人消费），**实际生效的是 7**；被问「阈值怎么配」时别答错，这是待清理的双源配置，见 [ROADMAP.md](./ROADMAP.md) P0-2。
 - `:124-134` 是关键：不通过时 `nextStage = plan_shots`，并把 issues/suggestions 拼成 `feedback` 回灌；`packages/agent/src/agents/plan.ts:71-81` 在下一轮生成时直接消费这个字段。
 - `:93-104` 模型调用失败或 JSON 坏了，降级为人工审批，不阻断主流程。
 
@@ -193,7 +193,7 @@ checkpoint 非持久（MemorySaver）、`critique_result` 事件空定义、DOUB
 - **`critique_result` 事件**：shared 里定义、前端监听，但服务端没有 emit；Critic 的结果目前只进图状态和消息流。
 - **MCP**：没有接入。Tool Registry 的接入点可以设计，但现在是硬编码 `AgentContext`。
 - **`CRITIC_SYSTEM_PROMPT`**（图像四维 rubric）定义了但 CriticAgent 没调用，当前只审分镜文本。
-- **残留**：`.env` 里 5 行 `DOUBAO_*` 配置已无代码消费；`UniversesPage.tsx` / `UniverseDetailPage.tsx` 保留但路由已下线。
+- **残留**：`.env` 里 5 行 `DOUBAO_*` 仍在，且**并非完全无消费** —— `config/app.config.ts:101-106` 读入 6 个字段，`video.service.ts:36,40,75,85,86` 把 `doubaoApiKey`/`doubaoVideoModel` 当兜底值、`doubaoVideoDuration`/`doubaoVideoRatio` 当默认参数使用；准确说法是「作为 legacy 兜底被读取，但没有独立 doubao provider 分支」，仅 `DOUBAO_GENERATE_AUDIO` 无人消费。`UniversesPage.tsx` / `UniverseDetailPage.tsx` 保留但路由已下线。
 - **face-api 局限**：半透明、背影、非人形参考图检不出脸，标 `no_reference`，不误判但也无法校验。
 - **i2i 修正**：手动触发，且会清空该镜视频，需要重新合成才会更新成片。
 - **成片字幕**：外挂 `final.srt`，没有烧录进画面。
