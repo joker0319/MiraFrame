@@ -5,7 +5,7 @@ export { createCheckpointer, resetCheckpointer } from "./checkpointer.js";
 
 // Agents
 export { BaseAgent } from "./agents/base.js";
-export type { AgentContext } from "./agents/base.js";
+export type { AgentContext, CritiqueReport } from "./agents/base.js";
 export { OutlineAgent } from "./agents/outline.js";
 export { PlanAgent } from "./agents/plan.js";
 export { ComposeAgent } from "./agents/compose.js";

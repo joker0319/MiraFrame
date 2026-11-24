@@ -1,6 +1,7 @@
 export { useProjectStore } from "./projectStore";
 export { useCharacterStore } from "./characterStore";
 export { useShotStore } from "./shotStore";
+export { useCritiqueStore } from "./critiqueStore";
 export { useRunStore } from "./runStore";
 export type { RunMode } from "./runStore";
 export { useMessageStore } from "./messageStore";

@@ -4,7 +4,7 @@ import { PlanAgent } from "../agents/plan.js";
 import { CriticAgent } from "../agents/critic.js";
 import { BaseAgent } from "../agents/base.js";
 import { ReviewRuleEngine } from "../agents/review.js";
-import type { AgentContext } from "../agents/base.js";
+import type { AgentContext, CritiqueReport } from "../agents/base.js";
 import type { Phase2StateType } from "../state.js";
 
 function mockCtx(overrides?: Partial<AgentContext>): AgentContext {
@@ -193,6 +193,84 @@ describe("CriticAgent", () => {
     const result = await agent.critiqueShots(ctx, state);
 
     expect(result.nextStage).toBe("shots_approval");
+  });
+
+  it("把评审结论通过 reportCritique 上报，带上阈值/轮次/路由结果", async () => {
+    const agent = new CriticAgent();
+    const reports: CritiqueReport[] = [];
+    const ctx = mockCtx({
+      callLlm: async () =>
+        '{"overall_score": 8.5, "dimensions": {"narrative": 9}, "issues": [], "suggestions": ["可加强转场"]}',
+      reportCritique: async (report) => {
+        reports.push(report);
+      },
+    });
+    const state = mockState({
+      critiqueRound: 0,
+      critiqueScores: {},
+      artifactText: '[{"order":1,"description":"开场"}]',
+    });
+
+    await agent.critiqueShots(ctx, state);
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      stage: "critique_shots",
+      entityType: "shots",
+      score: 8.5,
+      passed: true,
+      round: 1,
+      willRegenerate: false,
+      dimensions: { narrative: 9 },
+      suggestions: ["可加强转场"],
+    });
+    // 阈值/轮次上限要跟随环境变量实际值，前端才能解释「为什么没过」
+    expect(reports[0].threshold).toBe(Number(process.env.CRITIC_SCORE_THRESHOLD ?? 7));
+    expect(reports[0].maxRounds).toBe(Number(process.env.CRITIC_MAX_ROUNDS ?? 2));
+  });
+
+  it("低于阈值时上报 willRegenerate=true，让前端显示「将重写」", async () => {
+    const agent = new CriticAgent();
+    const reports: CritiqueReport[] = [];
+    const ctx = mockCtx({
+      callLlm: async () => '{"overall_score": 5, "issues": ["场景矛盾"], "suggestions": ["统一场景"]}',
+      reportCritique: async (report) => {
+        reports.push(report);
+      },
+    });
+    const state = mockState({
+      critiqueRound: 0,
+      critiqueScores: {},
+      artifactText: '[{"order":1,"description":"开场"}]',
+    });
+
+    await agent.critiqueShots(ctx, state);
+
+    expect(reports[0]).toMatchObject({
+      passed: false,
+      willRegenerate: true,
+      issues: ["场景矛盾"],
+    });
+  });
+
+  it("上报失败不影响评审结论（前端少张卡片，流程照走）", async () => {
+    const agent = new CriticAgent();
+    const ctx = mockCtx({
+      callLlm: async () => '{"overall_score": 8, "issues": [], "suggestions": []}',
+      reportCritique: async () => {
+        throw new Error("ws down");
+      },
+    });
+    const state = mockState({
+      critiqueRound: 0,
+      critiqueScores: {},
+      artifactText: '[{"order":1,"description":"开场"}]',
+    });
+
+    const result = await agent.critiqueShots(ctx, state);
+
+    expect(result.nextStage).toBe("shots_approval");
+    expect(result.critiqueScores).toEqual({ shots_round_1: 8 });
   });
 });
 

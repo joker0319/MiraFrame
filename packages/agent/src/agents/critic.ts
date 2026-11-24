@@ -121,6 +121,26 @@ export class CriticAgent extends BaseAgent {
       },
     );
 
+    // 结构化上报：前端据此渲染评分卡片（总分、阈值、轮次、维度、打回原因）。
+    // 上报失败只是前端少一张卡片，绝不能让已经跑完的评审白费，所以单独 try/catch。
+    try {
+      await ctx.reportCritique?.({
+        stage: "critique_shots",
+        entityType: "shots",
+        score,
+        threshold: SCORE_THRESHOLD,
+        passed,
+        round,
+        maxRounds: MAX_ROUNDS,
+        dimensions: result.dimensions ?? {},
+        issues: result.issues,
+        suggestions: result.suggestions,
+        willRegenerate: !passed,
+      });
+    } catch (err) {
+      console.warn("[CriticAgent] 评审结果上报失败（不影响主流程）：", err);
+    }
+
     return {
       currentStage: "critique_shots",
       // 路由决策在这里产生：通过 → 人工确认；不通过且未超轮次 → 回到 plan_shots 重写

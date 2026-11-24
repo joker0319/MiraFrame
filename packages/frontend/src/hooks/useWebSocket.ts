@@ -5,6 +5,7 @@ import { io, Socket } from "socket.io-client";
 import { useRunStore } from "@/stores/runStore";
 import { useCharacterStore } from "@/stores/characterStore";
 import { useShotStore } from "@/stores/shotStore";
+import { useCritiqueStore } from "@/stores/critiqueStore";
 import { useMessageStore } from "@/stores/messageStore";
 import { useProjectStore } from "@/stores/projectStore";
 import { resolveEventStage } from "@/utils/workflowStage";
@@ -43,6 +44,7 @@ function getStores() {
     shot: useShotStore.getState(),
     message: useMessageStore.getState(),
     project: useProjectStore.getState(),
+    critique: useCritiqueStore.getState(),
   };
 }
 
@@ -250,6 +252,23 @@ function applyEvent(eventName: string, data: Record<string, unknown>) {
     case "critique_result": {
       const dims = data.dimensions as Record<string, number>;
       const dimText = dims ? Object.entries(dims).map(([k, v]) => `${k}: ${v}`).join(", ") : "";
+      // 结构化结果入 store → 节点详情渲染评分卡片；消息流那条负责「可回溯」
+      if (typeof data.score === "number") {
+        stores.critique.record({
+          stage: String(data.stage ?? "critique_shots"),
+          entity_type: String(data.entity_type ?? "shots"),
+          entity_id: (data.entity_id as number | null | undefined) ?? null,
+          score: data.score,
+          threshold: Number(data.threshold ?? 7),
+          passed: data.passed === true,
+          round: Number(data.round ?? 1),
+          max_rounds: Number(data.max_rounds ?? 2),
+          dimensions: dims ?? {},
+          issues: (data.issues as string[]) ?? [],
+          suggestions: (data.suggestions as string[]) ?? [],
+          will_regenerate: data.will_regenerate === true,
+        });
+      }
       stores.message.addMessage({
         id: generateMessageId(),
         agent: "critic",

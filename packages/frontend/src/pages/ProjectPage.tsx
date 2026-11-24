@@ -23,6 +23,7 @@ import { useCharacterStore } from "@/stores/characterStore";
 import { useShotStore } from "@/stores/shotStore";
 import { useRunStore } from "@/stores/runStore";
 import { useMessageStore } from "@/stores/messageStore";
+import { useCritiqueStore } from "@/stores/critiqueStore";
 import { useChatPanelStore } from "@/stores/chatPanelStore";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useProjectWorkspaceData } from "@/hooks/useProjectWorkspaceData";
@@ -79,6 +80,7 @@ export default function ProjectPage() {
   const setCurrentRunId = useRunStore((s) => s.setCurrentRunId);
   const setAwaitingConfirm = useRunStore((s) => s.setAwaitingConfirm);
   const resetRunState = useRunStore((s) => s.resetRunState);
+  const resetCritique = useCritiqueStore((s) => s.reset);
   const setProjectOutlineApproved = useProjectStore((s) => s.setProjectOutlineApproved);
 
   // Local UI
@@ -219,7 +221,7 @@ export default function ProjectPage() {
   }, [isGenerating, projectId, queryClient]);
 
   // ---- Cleanup ----
-  useEffect(() => () => { clearProject(); clearCharacters(); clearShots(); clearMessages(); }, []);
+  useEffect(() => () => { clearProject(); clearCharacters(); clearShots(); clearMessages(); resetCritique(); }, [resetCritique]);
 
   // ---- Render states ----
   if (!projectId) return <div className="min-h-screen flex items-center justify-center bg-paper text-ink-2">无效的项目 ID</div>;

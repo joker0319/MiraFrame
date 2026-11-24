@@ -1,12 +1,37 @@
 import type { Phase2StateType } from "../state.js";
 import type { LlmChatMessage, LlmChatResponse, ToolDefinition } from "../tools/types.js";
 
+/**
+ * 一次自动评审的完整结论。
+ * 除了分数，还带上阈值、轮次上限和路由结果，前端才能解释
+ * 「为什么没过」「还有几次机会」「下一步是重写还是转人工」。
+ */
+export interface CritiqueReport {
+  stage: string;
+  entityType: string;
+  entityId?: number | null;
+  score: number;
+  threshold: number;
+  passed: boolean;
+  round: number;
+  maxRounds: number;
+  dimensions: Record<string, number>;
+  issues: string[];
+  suggestions: string[];
+  willRegenerate: boolean;
+}
+
 export interface AgentContext {
   projectId: number;
   runId: number;
   threadId: string;
   sendMessage: (content: string, opts?: { summary?: string; progress?: number; isLoading?: boolean; stage?: string }) => Promise<void>;
   sendThinking: (phase: "reasoning" | "decision" | "planning" | "reviewing", content: string, details?: string) => Promise<void>;
+  /**
+   * 把评审结论推给前端（评分卡片 + 消息流）。
+   * 可选：单测和 fake context 不实现时静默跳过，评审本身照常进行。
+   */
+  reportCritique?: (report: CritiqueReport) => Promise<void>;
   callLlm: (systemPrompt: string, userPrompt: string, opts?: { maxTokens?: number; intent?: string }) => Promise<string>;
   /**
    * 带工具调用能力的模型通道。可选：没有它时 ToolLoop 会自动降级到 JSON 协议，

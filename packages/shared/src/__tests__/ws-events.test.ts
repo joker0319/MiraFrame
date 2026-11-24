@@ -165,32 +165,36 @@ describe("AgentThinkingEventDataSchema", () => {
 });
 
 describe("CritiqueResultEventDataSchema", () => {
+  const base = {
+    stage: "critique_shots",
+    entity_type: "shots",
+    score: 7.5,
+    threshold: 7,
+    passed: true,
+    round: 1,
+    max_rounds: 2,
+    dimensions: { clarity: 8, creativity: 6 },
+    issues: ["Flat lighting"],
+    suggestions: ["Add rim light"],
+    will_regenerate: false,
+  };
+
   it("validates critique result", () => {
+    expect(CritiqueResultEventDataSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("validates payload with nullable entity_id", () => {
     expect(
-      CritiqueResultEventDataSchema.safeParse({
-        score: 7,
-        dimensions: { clarity: 8, creativity: 6 },
-        issues: ["Flat lighting"],
-        suggestions: ["Add rim light"],
-        entityType: "shot",
-        entityId: "550e8400-e29b-41d4-a716-446655440002",
-        willRegenerate: false,
-      }).success
+      CritiqueResultEventDataSchema.safeParse({ ...base, entity_id: null }).success
     ).toBe(true);
   });
 
   it("rejects score out of range", () => {
-    expect(
-      CritiqueResultEventDataSchema.safeParse({
-        score: 15,
-        dimensions: {},
-        issues: [],
-        suggestions: [],
-        entityType: "shot",
-        entityId: "550e8400-e29b-41d4-a716-446655440002",
-        willRegenerate: false,
-      }).success
-    ).toBe(false);
+    expect(CritiqueResultEventDataSchema.safeParse({ ...base, score: 15 }).success).toBe(false);
+  });
+
+  it("rejects round below 1", () => {
+    expect(CritiqueResultEventDataSchema.safeParse({ ...base, round: 0 }).success).toBe(false);
   });
 });
 

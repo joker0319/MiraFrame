@@ -32,6 +32,7 @@ import {
 } from "@/utils/projectWorkflow";
 import { WorkflowStatusBadge } from "./WorkflowStatusBadge";
 import { ConsistencyPanel } from "./ConsistencyPanel";
+import { CritiquePanel } from "./CritiquePanel";
 
 export function NodeDetail({
   projectId,
@@ -177,6 +178,8 @@ export function NodeDetail({
         )}
 
         {selectedNode.id === "shots" && <ShotNodeDetail shots={shots} />}
+
+        {selectedNode.id === "shots" && <CritiquePanel />}
 
         {selectedNode.id === "shotImages" && (
           <AssetStrip

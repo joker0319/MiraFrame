@@ -500,12 +500,17 @@ export interface OutlineUpdatedEventData {
 }
 
 export interface CritiqueResultEventData {
+  stage: string;
+  entity_type: string;
+  entity_id?: number | null;
   score: number;
+  threshold: number;
+  passed: boolean;
+  round: number;
+  max_rounds: number;
   dimensions: Record<string, number>;
   issues: string[];
   suggestions: string[];
-  entity_type: string;
-  entity_id: number;
   will_regenerate: boolean;
 }
 

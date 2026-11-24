@@ -8,13 +8,14 @@ import { DRIZZLE, type Db } from "../db";
 import { WsGateway } from "../ws";
 import { ImageService, TextService, VideoService, ConsistencyService } from "../services";
 import { buildPhase2Graph, createCheckpointer, setNodeContext, clearNodeContext, runWithNodeContext } from "@miraframe/agent";
-import type { LlmChatMessage, ToolDefinition } from "@miraframe/agent";
+import type { LlmChatMessage, ToolDefinition, CritiqueReport } from "@miraframe/agent";
 import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { and, asc, eq } from "drizzle-orm";
 import { schema } from "../db";
 import type { GenerationInput } from "./agent.service";
 import { buildInitialState, buildProjectContext, buildConversationHistory } from "./agent-run-state";
 import { buildArtifactLineage, matchCharacterIds, type LineageCharacter } from "./lineage";
+import { toCritiqueResultPayload } from "./critique-payload";
 
 @Processor("generation", { concurrency: 8 })
 @Injectable()
@@ -171,6 +172,15 @@ export class AgentProcessor extends WorkerHost {
           content,
           details,
         });
+      },
+
+      /**
+       * 评审结论的结构化出口。
+       * 载荷用 snake_case，与 shot_updated / run_progress 等既有事件保持一致；
+       * threshold / round / max_rounds 一并下发，前端不必再猜「为什么没过」。
+       */
+      reportCritique: async (report: CritiqueReport) => {
+        this.wsGateway.sendToProject(projectId, "critique_result", toCritiqueResultPayload(report));
       },
 
       callLlm: async (systemPrompt: string, userPrompt: string, opts?: { maxTokens?: number }) => {

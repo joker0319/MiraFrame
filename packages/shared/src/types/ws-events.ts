@@ -141,14 +141,25 @@ export const AgentThinkingEventDataSchema = z.object({
 });
 export type AgentThinkingEventData = z.infer<typeof AgentThinkingEventDataSchema>;
 
+/**
+ * Critic 每轮评审的结果。
+ * 载荷用 snake_case，与后端其它 WS 事件（shot_updated / run_progress）保持一致；
+ * threshold / round / max_rounds 让前端能解释「为什么没过、还有几次机会」，
+ * 不必再自己猜环境变量里的阈值。
+ */
 export const CritiqueResultEventDataSchema = z.object({
+  stage: z.string(),
+  entity_type: z.string(),
+  entity_id: z.number().int().nullable().optional(),
   score: z.number().min(0).max(10),
+  threshold: z.number(),
+  passed: z.boolean(),
+  round: z.number().int().min(1),
+  max_rounds: z.number().int().min(1),
   dimensions: z.record(z.number()),
   issues: z.array(z.string()),
   suggestions: z.array(z.string()),
-  entityType: z.string(),
-  entityId: z.string().uuid(),
-  willRegenerate: z.boolean(),
+  will_regenerate: z.boolean(),
 });
 export type CritiqueResultEventData = z.infer<typeof CritiqueResultEventDataSchema>;
 
