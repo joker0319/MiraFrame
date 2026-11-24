@@ -516,3 +516,46 @@ MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径�
 - 全仓 **264 个测试全过**（shared 60 / agent 92 / server 102 / frontend 10），`pnpm build` / `pnpm typecheck` 通过。
 
 **没做**：token 预算按模型上下文动态分配（目前是固定字符上限）；长期记忆只是单段散文，没有分槽（角色设定 / 分镜决定 / 风格偏好）或向量检索，跨项目不复用。
+
+---
+
+## Provider 选路与降级：从「重试同一个 URL」到「换一家继续」
+
+**动机**：原来的失败恢复只有一层——对同一个 URL 重试。429 退避、503 退避都对，但主 provider 出的是**结构性故障**（密钥失效、账号欠费、区域不可用）时，重试只会一路撞到超时，用户等到的是「生成失败」而不是「换一家继续」。旧计划第 6 条「无 provider 路由策略」一直没落地，正好是「工具调用 / 失败恢复」叙事里最软的一环。
+
+**设计：重试负责抖动，选路负责故障**
+
+| 层 | 负责 | 触发 |
+| --- | --- | --- |
+| 单 provider 重试（已有） | 瞬时抖动 | 429、503、`queue_full`、网络错误 |
+| 跨 provider 选路（本次） | 结构性故障 | 401/403、5xx 连续失败、重试耗尽 |
+
+- **候选链**：`TEXT_PROVIDERS=agnes,kimi` 按声明顺序尝试；每项的 `TEXT_<NAME>_BASE_URL` / `_API_KEY` / `_MODEL` / `_ENDPOINT` 覆盖通用 `TEXT_*`，缺省自动继承。不配 `*_PROVIDERS` 时链长度为 1，**行为与改造前完全一致**。
+- **熔断**：同一家连续失败 3 次（可配）进入冷却，冷却 `30s × 2^(n-1)`、封顶 5 分钟；冷却期内跳过，到期后放一个 half-open 试探，成功即清零恢复。
+- **错误分类**：可切换 = 网络 / 超时 / 429 / 408 / 401 / 403 / 5xx；不可切换 = 其余 4xx（400/422 换谁都一样，切了只会再错一次，还会污染健康度）。
+- **观测**：`GET /api/v1/providers` 返回每家的 `state / successes / failures / successRate / avgLatencyMs / consecutiveFailures / cooldownRemainingMs / lastError`，只读脱敏（不含 baseUrl 与密钥）。
+
+**改动**
+- `services/provider-routing.ts`（新，纯逻辑零 IO）：`resolveProviderChain`、`chainFingerprint`、`classifyProviderFailure`、`ProviderHttpError`、`ProviderRouter`（plan / attemptOrder / recordSuccess / recordFailure / syncChain / snapshot）、`readRouterOptions`。
+- `services/text.service.ts`：`generate` 与 `generateWithTools` 都改为「解析链 → 路由循环 → 单次尝试」；抽出 `attemptGenerate` / `attemptWithTools`；`envReader` 保留 `TEXT_* → ANTHROPIC_* → app.*` 的旧兜底顺序，避免只配 `ANTHROPIC_AUTH_TOKEN` 的环境被判成「没有 key」。
+- `services/image.service.ts`：同样接入，`fake` fixture、无 key 占位、dashscope 轮询等旧分支原样保留。
+- `services/video.service.ts`：同样接入；`attemptVideo` 里按 `baseUrl` 嗅探 dashscope / agnes / 通用三种请求体，Agnes 的提交错误改抛 `ProviderHttpError` 以便按状态码分类。
+- `modules/config/providers.controller.ts`（新）+ `config.module.ts`：注册只读观测端点。
+- `config/startup-check.ts`：provider 检查改为按链逐项校验（多链时摘要输出 `providers=a(openai) → b(openai)`），保留单链时的旧文案；`ALLOWED_PROVIDERS` 放宽到 `openai / fake / dashscope / agnes / anthropic`（该值只影响日志与嗅探提示，实际协议看 baseUrl）。
+- `.env.example`：新增多 provider 与熔断参数示例，三个能力段各加一句写法指引。
+
+**两个被测试逼出来的修正（值得记下来）**
+
+1. **半开必须排在最前面**。最初排序是「健康 → 半开 → 冷却」，结果备用一直健康、每次都先成功，主 provider 冷却到期后永远轮不到试探，等于被永久摘除。改成 probe 优先，代价是一次探测请求。
+2. **备用也会熔断**。单测里主备同时 5xx，两家都进冷却，此时请求走「全链冷却」分支：不直接失败，best-effort 尝试最早恢复的一家。硬失败对调用方没有价值，而抖动常常已经恢复。
+
+**工具通道的专属取舍**：`function calling` 返回 400 在普通调用里是「参数错、不切换」，但在工具通道里通常意味着「这家不支持 tools」，换一家有意义。所以 `ProviderHttpError` 支持 `switchableOverride` 覆盖默认分类；整条链都不支持时才回 `TOOLS_UNSUPPORTED`，ToolLoop 仍按原设计降级 JSON——**降级路径没变，只是多了一次换家的机会**。429 不被 override 影响，仍是 `rate_limit` 语义。
+
+**验证**
+- 34 个用例（`provider-routing.test.ts` 23 + `provider-failover.test.ts` 11）：链解析与 scoped 覆盖、去重、空 key 不剔除、指纹不含密钥；错误分类七类 + override；熔断状态机（阈值、冷却、half-open 顺序、指数翻倍与封顶、全熔断 best-effort、无 key 过滤、`syncChain` 保留健康度、成功率/延迟统计）；text / image 两个服务的真实切换、400 不切换、熔断后跳过、聚合错误、fake 兜底、tools 400/429 两条路径。
+- 本地起两个真实 HTTP server（主 401 / 备 200）跑 4 次 `generate`：请求序列 `primary → backup → primary → backup → primary → backup → backup`，第 3 次日志出现「primary 连续失败 3 次，熔断 30s」，第 4 次「primary 冷却中（剩 30s），本次跳过」；快照里 `state=open`、`skips=1`、`backup.successRate=1`、`avgLatencyMs≈2`。
+- 全仓 **298 个测试全过**（shared 60 / agent 92 / server 136 / frontend 10），`pnpm build` / `pnpm typecheck` 通过。
+
+**顺手修的工程问题**：根 `package.json` 的 `test` 是 `vitest run`，而 `vitest.workspace.ts` 在 vitest 4 已不再被读取（CI 用的是 `pnpm -r test`，所以一直没暴露）。根目录直接跑会收集所有包但用根配置，导致 `@/` 别名与 `MIRAFRAME_MCP_ASSETS=0` 都失效。改为 `test: pnpm -r test`（与 CI 一致），删掉失效的 `vitest.workspace.ts`。
+
+**没做**：按成本/延迟动态加权的负载均衡（当前是静态优先级 + 熔断）；熔断状态跨进程共享（多实例各算各的，要做得上 Redis）；协议仍按 baseUrl 嗅探，新增特殊协议的供应商还要改代码。候选名默认 `openai` 的规则也值得注意：只写 `TEXT_PROVIDERS=a,b` 而忘了 `TEXT_PROVIDER` 时按 OpenAI 兼容处理，不会静默变成 fake。

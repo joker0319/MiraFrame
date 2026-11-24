@@ -58,7 +58,7 @@ MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简�
 | Human-in-the-Loop | 在故事大纲、角色设定、分镜脚本阶段支持用户反馈修改                            |
 | 前后端类型共享           | `@miraframe/shared` 提供 Zod Schema 和 TypeScript 类型    |
 | 实时进度同步            | 后端 WebSocket 推送节点状态、日志和生成结果                          |
-| 失败处理              | 图片、视频、LLM 调用失败后进入失败态并支持重试                            |
+| 失败处理              | 单 provider 内分类重试；跨 provider 支持候选链切换 + 熔断（`GET /api/v1/providers` 只读观测） |
 | 生成服务配置            | 文本、图像、视频服务可在设置面板中配置和测试                               |
 | 全栈工程结构            | pnpm workspace 管理 frontend / server / agent / shared |
 
@@ -225,6 +225,17 @@ VIDEO_API_KEY=your_video_api_key
 ```
 
 也可以启动项目后，在右上角“设置”面板中配置文本、图像和视频生成服务。
+
+需要多个供应商兜底时，声明候选链即可（按顺序尝试，连续失败自动熔断并切下一家；不写 `*_PROVIDERS` 时行为与单 provider 完全一致）：
+
+```env
+TEXT_PROVIDERS=agnes,kimi
+TEXT_KIMI_BASE_URL=https://api.moonshot.cn/v1
+TEXT_KIMI_API_KEY=your_kimi_key
+TEXT_KIMI_MODEL=kimi-k3
+```
+
+熔断参数可用 `PROVIDER_FAILURE_THRESHOLD` / `PROVIDER_COOLDOWN_MS` / `PROVIDER_MAX_COOLDOWN_MS` 调整；`GET /api/v1/providers` 可以查看链上各家的状态、成功率、平均延迟与剩余冷却时间（不含密钥与 baseUrl）。
 
 ### 4. 安装依赖
 

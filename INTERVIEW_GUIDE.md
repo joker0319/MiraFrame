@@ -18,12 +18,12 @@
 
 1. **决策层**：Director 用 LLM 产出 `executionPlan`，但阶段走白名单 + 必需阶段约束，模型只能在一定范围内裁量；Critic 按四维 rubric 给分，不通过就把 issues/suggestions 写回 `feedback`，PlanAgent 下一轮直接消费；ReviewAgent 在用户反馈后决定回流到哪个阶段。
 2. **执行层**：LangGraph 状态图串起 6 个生产节点和 4 个人工门；门的等待位置落到 DB 的 `awaitingGate`，靠 Redis 的 confirm 消息恢复；续跑用 `target_stage` 从指定阶段切入，已完成素材不重生成。
-3. **保障层**：文本 429 用进程级串行队列 + `Retry-After` + 指数退避；视频 503/`queue_full` 分类重试、封顶 120 秒；一致性用 face-api wasm（9 张图 1.8 秒，比 cpu 快约 23 倍）+ 贪心指派避免多角色抢脸；漂移镜头可用角色参考图走 i2i 反哺。前端通过 29 类 WS 事件实时看到进度、门、产物和告警。
+3. **保障层**：文本 429 用进程级串行队列 + `Retry-After` + 指数退避；视频 503/`queue_full` 分类重试、封顶 120 秒；这些是「同一家内的重试」，再往上一层是候选链 + 熔断（连续失败切备用、指数冷却、half-open 探活），应对密钥失效/账号欠费这类重试救不回来的故障；一致性用 face-api wasm（9 张图 1.8 秒，比 cpu 快约 23 倍）+ 贪心指派避免多角色抢脸；漂移镜头可用角色参考图走 i2i 反哺。前端通过 29 类 WS 事件实时看到进度、门、产物和告警。
 
 ### 结果数据（可引用）
 
-- 后端最近一次验证 **102 个测试全过**，全仓 `pnpm build` / `pnpm typecheck` 通过；源码中 **264 个测试用例**分布在四个包（含 P0 加固 18 个、并发上下文隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个）。
-- 项目共 **42 个提交**（含文档提交）；一致性相关三次提交 `dfbfcb0 → c5fc8f7 → 7037473` 对应「检测 → 自动接入流水线 → 反哺修正」三步演进。
+- 后端最近一次验证 **136 个测试全过**，全仓 `pnpm build` / `pnpm typecheck` 通过；源码中 **298 个测试用例**分布在四个包（含 P0 加固 18 个、并发上下文隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个、provider 选路 34 个）。
+- 项目共 **58 个提交**（含文档提交）；一致性相关三次提交 `dfbfcb0 → c5fc8f7 → 7037473` 对应「检测 → 自动接入流水线 → 反哺修正」三步演进。
 - 真实运行：project-23 **6 镜头 / 3 角色**，一致性端到端 **1.85 秒**；续跑 run 51 结果 `ok=2 review=4 drift=0`。
 - i2i 反哺对照：沈鸢人脸距离从灰区约 **0.4 → 0.22**；临时项目端到端实测 **0.2562，判定 ok**。
 - 视频 503 场景：6 镜头项目原本只有 4 个出片，按 `target_stage=render_shot_images` 续跑后补齐，成片 **4.4MB**。
@@ -104,21 +104,22 @@
 
 ---
 
-### 案例 4：真实供应商的失败恢复（429 / 503 / 增量）
+### 案例 4：真实供应商的失败恢复（429 / 503 / 熔断降级 / 增量）
 
-**S** 换过 Kimi、百炼、Agnes 三家供应商，各自有坑：Kimi 429 且账号并发只有 1、RPM 3；Agnes 免费视频队列满会返回 503 `video_queue_full`；早期一次探测误用了付费模型，烧了约 ¥17–27。
+**S** 换过 Kimi、百炼、Agnes 三家供应商，各自有坑：Kimi 429 且账号并发只有 1、RPM 3；Agnes 免费视频队列满会返回 503 `video_queue_full`；早期一次探测误用了付费模型，烧了约 ¥17–27。更要命的是密钥过期/欠费这类故障，重试再多次也救不回来。
 
-**T** 不靠「手动重试」，把供应商差异收敛到配置层和服务层。
+**T** 不靠「手动重试」，把供应商差异收敛到配置层和服务层，并区分「抖动」与「故障」。
 
 **A**
-- 文本：`packages/server/src/services/text.service.ts:9` 进程级静态串行队列，`:211-224` 排队；`:226-259` 重试；`:262-284` 优先读 `Retry-After`，其次读错误文本里的秒数，最后指数退避 `base × 2^attempt` + 抖动。429 耗尽抛明确错误（`:186-188`），不再误判为「模型不支持 tools」。
-- 视频：`packages/server/src/services/video.service.ts:420-444` 把 503/429/502/504 和 `queue_full|队列已满|rate limit|busy` 归为可重试，退避 `min(base × 2^n, 120s)`；当前 `.env` 是 `VIDEO_MAX_RETRIES=8`、`VIDEO_RETRY_BASE_MS=8000`。
+- 文本重试：`text.service.ts` 的静态 `requestQueue` 串行化 + `fetchWithRetry`；`resolveRetryDelay` 优先读 `Retry-After`、其次读错误文本里的秒数、最后指数退避 `base × 2^attempt` + 抖动。429 耗尽抛明确错误，不误判为「模型不支持 tools」。
+- 视频重试：`video.service.ts` 的 `generateAgnesVideo` 把 503/429/502/504 和 `queue_full|队列已满|rate limit|busy` 归为可重试，退避 `min(base × 2^n, 120s)`；当前 `.env` 是 `VIDEO_MAX_RETRIES=8`、`VIDEO_RETRY_BASE_MS=8000`。
+- 跨 provider 降级：`services/provider-routing.ts` 解析 `TEXT_PROVIDERS=agnes,kimi` 候选链，连续失败 3 次熔断（指数冷却、half-open 探测），只对 401/403/429/5xx/网络错误切换、400 不切也不计熔断；text / image / video 三个服务都接入，`GET /api/v1/providers` 暴露各家的成功率、平均延迟与冷却状态。
 - 增量：`packages/server/src/agent/revision.service.ts:43-107` 用持久化的 `shots.characterIds` 做血缘分析，只把受影响镜头的 `imageUrl/videoUrl/consistencyResult` 置空，其余复用。
-- 成本教训沉淀为规则：探测只读、最小单任务、模型全部配置化（`packages/server/src/config/app.config.ts:56-99`）。
+- 成本教训沉淀为规则：探测只读、最小单任务、模型全部配置化（`packages/server/src/config/app.config.ts`）。
 
-**R** 6 镜头项目原本只有 4 个出视频，日志出现 `HTTP 503，9s 后重试 (1/8)`，续跑后补齐，成片 4.4MB；文本侧把 reasoning token 从约 2500 压到约 27。
+**R** 6 镜头项目原本只有 4 个出视频，日志出现 `HTTP 503，9s 后重试 (1/8)`，续跑后补齐，成片 4.4MB；文本侧把 reasoning token 从约 2500 压到约 27。降级链路用本地两个真实 HTTP server 验证：主返回 401、备返回 200，第 1–2 次调用切换成功，第 3 次触发熔断，第 4 次只打备用（`primary → backup → primary → backup → primary → backup → backup`）。
 
-**可能被追问**：为什么不直接换付费模型？→ 免费额度够用，且成本不确定是原型阶段最大的风险；把 provider 做成配置后，切换只需改环境变量。
+**可能被追问**：为什么不直接换付费模型？→ 免费额度够用，且成本不确定是原型阶段最大的风险；把 provider 做成配置后，切换只需改环境变量。那熔断会不会误伤？→ 400 类请求错误明确不切换也不计失败，且半开探测成功即恢复，冷却时长有上限。
 
 ---
 
@@ -169,7 +170,7 @@
 产物、run 状态、门位置、图的 checkpoint 都在 PostgreSQL。进程重启后 BullMQ 重新拾起未完成的 job，同 `thread_id` 的 checkpoint 已存在，图从最后完成的节点继续；只有超过 30 分钟的残留 run 会被启动清理标记为 cancelled。
 
 **Q5：外部模型限流怎么处理？**
-文本 429：串行队列 + `Retry-After` + 指数退避；视频 503：可重试错误分类 + 退避封顶 120 秒；两者都有次数上限，耗尽后抛明确错误并保留已完成素材，配合 `target_stage` 续跑。
+两层。单 provider 内：文本 429 走串行队列 + `Retry-After` + 指数退避，视频 503 走可重试错误分类 + 退避封顶 120 秒，都有次数上限，耗尽后抛明确错误并保留已完成素材，配合 `target_stage` 续跑。跨 provider：重试耗尽后按候选链切下一家，并把连续失败的那家熔断一段时间，见 Q14。
 
 **Q6：怎么评估生成质量？**
 分两层：文本层用 Critic LLM-as-Judge 打分并打回重写（有 rubric、阈值、轮次上限）；视觉层用 face-api 数值距离判角色一致性，漂移可再用参考图 i2i 修正。两层都不是「人肉看一眼」。
@@ -184,7 +185,7 @@
 EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 Agent 工程能力迁移到内容生成场景：LLM-as-Judge、多 Agent 路由、Monitor 闭环是共通的；MCP 在 MiraFrame 里用真实素材库 server 落了地（连接层主用官方 `@langchain/mcp-adapters`），多轮记忆做了增量滚动摘要，六大考点都有对应实现。
 
 **Q10：最大的技术债是什么？**
-`critique_result` 事件**已补齐**（P1-2：Critic 每轮评审后经 WS 下发评分、阈值、轮次与打回原因，前端节点详情渲染评分卡片）；`_nodeCtx` 全局兜底**已删除**（P1-4：节点上下文只走 ALS，取不到直接报错）。剩余技术债是字幕外挂 SRT 没烧进画面、i2i 修正目前是手动触发、长期记忆只是单段摘要（没有向量检索、跨项目不复用）、WS 是进程内广播没接 Redis adapter。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
+`critique_result` 事件**已补齐**（P1-2：Critic 每轮评审后经 WS 下发评分、阈值、轮次与打回原因，前端节点详情渲染评分卡片）；`_nodeCtx` 全局兜底**已删除**（P1-4：节点上下文只走 ALS，取不到直接报错）；provider 选路/降级**已补齐**（P2：候选链 + 熔断 + 只读健康端点，见 Q14）。剩余技术债是字幕外挂 SRT 没烧进画面、i2i 修正目前是手动触发、长期记忆只是单段摘要（没有向量检索、跨项目不复用）、WS 是进程内广播没接 Redis adapter。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
 
 **Q11：BullMQ 并发 8，怎么保证项目之间不串号？**
 上下文不走模块级全局变量，只走 `AsyncLocalStorage`：processor 用 `runWithNodeContext(ctx, () => compiled.invoke(...))` 把每个 job 的 ctx 绑定在自己的异步链上，节点里 `getNodeCtx()` 只从 ALS 取。早先这里有个 `_nodeCtx` 全局兜底 + 取不到就返回 mock（`callLlm` 吐 `"{}"`），并发下会串号、且静默产出空结果还显示成功——现在取不到直接抛 `[agent:ctx] 图节点拿不到 AgentContext`。模块级共享的只有两类东西：Agent 实例（只持有 `readonly name`，无状态）和 checkpointer 单例（内部是 pg 连接池，本来就该复用，不持有项目上下文）。测试用 8 个不同 `projectId` 并发跑 Critic 节点、故意错开 LLM 延迟，断言每份回报的 issues/suggestions 都来自它自己的 job。
@@ -225,6 +226,26 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 
 还有两个细节：`coveredThroughId` 用 `Math.max(旧值, 新值)` 保证只前进不后退（job 重放时不会重复折叠）；`keepTurns` 与 `minChars` 都走环境变量（`MIRAFRAME_MEMORY_KEEP_TURNS` / `MIRAFRAME_MEMORY_MIN_CHARS`），测试里可以精确控制。验收是真实 Postgres 跑一次：6 轮对话 → 折叠第 1-3 轮、`covered_through_id` 落库、prompt 里只剩 4-6 轮原文 + 摘要，删项目级联清掉记忆行。
 
+**Q14：provider 挂了怎么降级？熔断会不会误伤？**
+
+原来的实现只有一层：对同一个 URL 重试。429 退避、503 退避都对，但如果主 provider 是密钥失效、账号欠费、区域故障，重试只会一路撞到超时——用户等到的是「生成失败」，而不是「换一家继续」。
+
+现在是两层，**重试负责抖动，选路负责故障**：
+
+- **候选链**：`TEXT_PROVIDERS=agnes,kimi` 按顺序尝试，每个候选的 `TEXT_<NAME>_BASE_URL / _API_KEY / _MODEL` 覆盖通用 `TEXT_*`。不配就是单元素链，行为与改造前完全一致——这点很重要，降级能力不能以破坏默认路径为代价。
+- **熔断**：同一家连续失败 N 次（默认 3）进入冷却，冷却时长指数翻倍、封顶 5 分钟；冷却期内直接跳过，到期后放一个**试探**请求（half-open），成功即恢复、失败则冷却翻倍。
+- **分类**：只有「换一家可能有用」的失败才切换——网络、超时、429、5xx、401/403。401/403 也算可切换，因为主 key 失效时备用 key 往往就是好的，这正是降级最该救的场景。反过来 400/422 是请求本身有问题，换谁都一样，**不切换、也不记入熔断**，否则一个坏 prompt 能把整条链的健康度打穿。
+- **观测**：`GET /api/v1/providers` 返回每家的状态、成功率、平均延迟、连续失败数、剩余冷却时间、上次错误（只读脱敏，不含 baseUrl 和密钥）。演示时可以直接 curl，看主 provider 连续 401 之后 `closed → open → half_open` 的过程。
+
+有两个设计点是被测试逼出来的，讲出来比只讲结论有说服力：
+
+1. **半开的候选必须排在最前面**。最初的实现是「健康 → 半开 → 冷却」，结果备用一直健康、每次都先成功，主 provider 冷却到期后永远轮不到试探，等于被永久摘除。改成 probe 优先，代价是一次探测请求，换来的是主能真正恢复。
+2. **备用也会熔断**。测试里主备同时 5xx 时，两家都会进冷却，这时请求会走「全链冷却」分支：不在第一次就认输，而是 best-effort 尝试最早恢复的那一家。硬失败对调用方没有价值，而抖动常常已经恢复了。
+
+工具通道还有个专属处理：`function calling` 返回 400 在普通调用里是「参数错、不该切换」，但在工具通道里通常意味着「这家不支持 tools」，换一家就有意义。所以 `ProviderHttpError` 支持 `switchableOverride` 覆盖默认分类；整条链都不支持时才回 `TOOLS_UNSUPPORTED`，让 ToolLoop 按原设计降级到 JSON 协议——**降级路径没变，只是多了一次换家的机会**。
+
+边界也要说清楚：这是**静态优先级 + 熔断**，不是按成本/延迟动态加权的负载均衡，也没有跨进程共享熔断状态（多实例各算各的，要做得上 Redis）。真要做「成本驱动」，得先有按 token 计费的账本，那是另一个工程量级。
+
 ---
 
 ## 5. 诚实边界（主动交代比被问出来强）
@@ -235,6 +256,7 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 - **`CRITIC_SYSTEM_PROMPT`**（图像四维 rubric）定义了但 CriticAgent 没调用，当前只审分镜文本。
 - **残留（P0 已清理）**：`DOUBAO_*` 配置与 `app.config.ts` 里的兜底字段、`UniversesPage.tsx` / `UniverseDetailPage.tsx` / `universesApi.ts` 均已删除；宇宙路由保留重定向以免旧链接 404。`config/` 接口已加 `ADMIN_TOKEN` 守卫，CORS 收紧为白名单，明文 `reveal` 接口移除。
 - **长期记忆的边界**：`conversation_memory` 每个项目一行，存的是单段摘要，没有向量检索、不能跨项目复用；摘要质量依赖模型，`keepTurns=5` 之外的细节只剩压缩后的一句。真要做得更细，应该按「角色设定 / 分镜决定 / 风格偏好」分槽存储，而不是一段散文。
+- **provider 选路的边界**：静态优先级 + 熔断，不是按成本/延迟动态加权的负载均衡；熔断状态在进程内，多实例部署时各算各的（应改 Redis 共享）；候选链目前靠 `BASE_URL` 嗅探协议（dashscope / agnes / 通用 OpenAI），新增一家特殊协议仍要改代码。
 - **face-api 局限**：半透明、背影、非人形参考图检不出脸，标 `no_reference`，不误判但也无法校验。
 - **i2i 修正**：手动触发，且会清空该镜视频，需要重新合成才会更新成片。
 - **成片字幕**：外挂 `final.srt`，没有烧录进画面。
@@ -249,6 +271,7 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 | Director / Critic / Review | `packages/agent/src/agents/{director,critic,review}.ts`、`prompts/{director,critic}.ts` |
 | 执行器与门持久化 | `packages/server/src/agent/agent.processor.ts`、`agent-run-state.ts` |
 | 增量与续跑 | `packages/server/src/agent/revision.service.ts`、`services/lineage.ts` |
+| Provider 选路与熔断 | `packages/server/src/services/provider-routing.ts`、`modules/config/providers.controller.ts` |
 | Provider 与失败恢复 | `packages/server/src/services/{text,video,image,tts}.service.ts`、`config/app.config.ts` |
 | 一致性闭环 | `packages/server/src/services/{face,consistency,consistency.service,shot-repair}.service.ts`、`agent/agent.processor.ts:753-802` |
 | 前后端契约 | `packages/shared/src/types/*`、`constants/{events,stages,approval}.ts` |

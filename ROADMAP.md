@@ -3,7 +3,7 @@
 > 数据截至 2026-11-24，代码基线 `82ae3d4`（42 个提交）。
 > 配套：[RESUME.md](./RESUME.md)（简历写法）、[INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md)（面试口述）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）。
 > 工期单位沿用 `multi-agent-upgrade-plan.md` 的「晚」（每天 2–3 小时）。
-> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理、P1-3 工具层/MCP 也已完成**，下方各节保留为实施记录与验收依据。当前待办：P1-5（前端测试扩充）。P1-5 已部分完成——前端用例从 4 个增加到 10 个。
+> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理、P1-3 工具层/MCP 也已完成**，下方各节保留为实施记录与验收依据。**更新 2026-11-25：P2 的滚动摘要与 provider 选路/降级已完成**；剩余待办是 P1-5（前端测试扩充，已从 4 个加到 10 个）与 P2 的多模态 Critic、字幕烧录、i2i 自动联动。
 
 ---
 
@@ -41,12 +41,12 @@
 | 3 | 无调度者（顺序写死） | **部分** | Director 已接入 `graph.ts:8,28-37`、`nodes/index.ts:245-252`；但生产节点之间仍是固定 `addEdge`（`graph.ts:40-55`），模型只能裁剪可选阶段 |
 | 4 | Agent 间无通信 | **部分** | 打回语义已有（`critic.ts:127-134` + `plan.ts:71-81`），但仍是纯 state 共享，`state.ts` 无 `messages` 字段、全仓无 `handoff` |
 | 5 | `artifactLineage` 空转 | **部分** | 字段已写入（`state.ts:22`、`lineage.ts:61-71`），但影响面分析实际走持久化的 `shots.characterIds`（`revision.service.ts:40-41,75-83`）；无 artifacts 表 |
-| 6 | 无 provider 路由策略 | **未实现** | `text.service.ts:226-259` / `video.service.ts:420-444` 只是对同一 URL 重试；无切换、降级、成功率/成本指标 |
+| 6 | 无 provider 路由策略 | **已实现** | `services/provider-routing.ts`：候选链 + 连续失败熔断（指数冷却、half-open 探测）+ 按错误类型决定切换；`GET /api/v1/providers` 暴露成功率/延迟/冷却状态 |
 | 7 | 上下文失忆 | **基本解决** | `messages` 按轮分组注入 + 滚动摘要（`agent/conversation-memory.ts`，`coveredThroughId` 增量折叠，摘要失败三条兜底）；剩余缺口是 token 预算装配（未按模型上下文长度动态分配）与反馈意图分类 |
 | 8 | 无 MCP | **未实现** | 仅 `tools/registry.ts:9-10` 注释提及；无 mcp 目录、无 `@langchain/mcp-adapters` 依赖 |
 | 9 | `_nodeCtx` 全局单例 | **部分** | AsyncLocalStorage 已用于主路径（`nodes/index.ts:50-54`、`agent.processor.ts:600,605,744`），但 `:49,57-60` 全局兜底、`:67-89` mock 静默降级仍在 |
 
-> 结论：九条里 **1 条已实现、6 条部分实现、2 条未实现**。旧计划里「P0/P1/P2 主干」的说法已经过期，别再拿它当待办清单。
+> 结论：九条里 **3 条已实现（1 Critic、6 provider 选路、8 MCP）、6 条部分实现**。旧计划里「P0/P1/P2 主干」的说法已经过期，别再拿它当待办清单。
 
 ### 面试指南「诚实边界」复核
 
@@ -150,7 +150,7 @@
 | 项 | 动机 | 落地点 | 验收 |
 | --- | --- | --- | --- |
 | **多模态 Critic** | `prompts/critic.ts:1-15` 的 `CRITIC_SYSTEM_PROMPT`（图像四维 rubric）定义了却从未调用；让模型直接看镜头图打分，并与 face-api 数值结果合并成一条质量结论 | `agents/critic.ts`、`server/src/services/image.service.ts` | 分镜图能产出评分，与一致性结果汇入同一报告 |
-| **provider 选路 / 降级** | 目前只有「同一 URL 重试」，无成功率/延迟/成本驱动的切换（旧计划第 6 条未实现） | `config/app.config.ts`、`services/{text,video}.service.ts` | 主 provider 连续失败时自动切备用并记日志 |
+| **provider 选路 / 降级** | **已完成（2026-11-25）**：`provider-routing.ts` 解析候选链（`TEXT_PROVIDERS=agnes,kimi`，scoped 变量覆盖通用值），连续失败熔断 + 指数冷却 + half-open 探测，按错误类型决定是否切换（401/403/429/5xx 切，400/422 不切也不计熔断），`GET /api/v1/providers` 输出只读健康快照。剩余：无成本/延迟加权，熔断状态不跨实例 | `services/provider-routing.ts`、`services/{text,image,video}.service.ts`、`modules/config/providers.controller.ts` | 主 provider 连续失败自动切备用并记日志（34 个用例 + 本地双 server 端到端验证） |
 | **多轮记忆** | ~~`messages` 只被拼成 contextBlock~~ → **滚动摘要已完成**（2026-11-25）：`conversation-memory.ts` 增量折叠旧轮次、`conversation_memory` 表存摘要与 `coveredThroughId` 游标；剩余 token 预算装配与反馈意图分类 | `agent-run-state.ts`、`agent/conversation-memory*.ts` | 长会话下反馈能跨 5 轮保持连贯，且 prompt 不超预算 |
 | **字幕烧录** | 成片字幕仍是外挂 `final.srt`（`video.service.ts:195-196`），无 `subtitles`/`libass` 滤镜 | `services/video.service.ts` | 输出内嵌中文字幕的 mp4（需处理容器字体） |
 | **i2i 自动修正 + 视频联动** | 目前手动触发（`projects.controller.ts:193-200`），且重画会清空 `videoUrl`（`shot-repair.service.ts:78`）需手动重合成 | `agent.processor.ts` 自动校验后、`shot-repair.service.ts` | drift 经确认后自动重画并重合成该镜视频 |
