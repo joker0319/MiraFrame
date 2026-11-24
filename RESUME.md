@@ -96,7 +96,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 | 数据 | 口径 / 出处 |
 | --- | --- |
 | 50+ 个提交、4 个包、176 个 TS/TSX 文件 | `git rev-list --count HEAD`；含 25 个测试文件，非测试 151 个 |
-| 220 个测试用例 / 25 个测试文件；后端 72 全过；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个、并发隔离 4 个、工具层与 MCP 20 个；`INTERVIEW_GUIDE.md` §0 |
+| 220 个测试用例 / 25 个测试文件；后端 72 全过；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个、并发隔离 4 个、工具层与 MCP 30 个；`INTERVIEW_GUIDE.md` §0 |
 | 6 个生产阶段、4 个人工门、29 类 WS 事件、16 个 stage 定义 | `shared/src/constants/{events,stages}.ts`、`agent/src/nodes/index.ts` |
 | face-api 9 张图 41s → 1.8s（约 23×） | wasm 后端 + 模型单例缓存，`face.service.ts` |
 | 一致性端到端 1.85s（6 镜头 / 3 角色） | project-23，`GET /consistency?refresh=1` |

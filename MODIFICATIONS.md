@@ -423,7 +423,7 @@ VIDEO_TIMEOUT_MS=300000
 - `Dockerfile.server`：显式 `ENV MIRAFRAME_MCP_ASSETS=0` —— 生产镜像不带源码，素材库没有可暴露的文件，避免每个 job 白起一个子进程再降级。
 - `vitest.config.ts`（agent/server）：默认 `MIRAFRAME_MCP_ASSETS=0`，MCP 用例显式传 `enabled: true`。
 
-**验证**：全仓 **220 个测试全过**（shared 60 / agent 78 / server 72 / frontend 10），`pnpm build`、`pnpm typecheck` 通过。新增 20 个用例，分四层：
+**验证**：全仓 **220 个测试全过**（shared 60 / agent 78 / server 72 / frontend 10），`pnpm build`、`pnpm typecheck` 通过。新增 30 个用例，分四层：
 
 | 层 | 文件 | 关键断言 |
 | --- | --- | --- |
