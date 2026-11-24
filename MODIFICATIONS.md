@@ -349,3 +349,17 @@ VIDEO_TIMEOUT_MS=300000
 - **工程卫生**：删除 agent 层三处调试探针日志、已下线的宇宙页面与 `universesApi`（含两处 barrel 导出）、`db:push` 脚本；挂载此前定义但未使用的 `ErrorBoundary`；删除 `getProviderLabel` 里的 doubao 死映射。
 - **CI**：新增 `.github/workflows/ci.yml`（`install --frozen-lockfile` → `build` → `typecheck` → `pnpm -r test`）；移除空转的 `test:e2e` 脚本（无 playwright 依赖与配置）。
 - **验证**：`pnpm build` / `pnpm typecheck` 全通过，全仓 **167 个测试全过**（新增 `p0-hardening.test.ts` 18 个，覆盖 CORS 解析、房间 ID、常量时间比较、AdminGuard 四种分支、启动诊断六类告警）。后端进程在本环境未能后台拉起，端到端 curl 验证留待后续。
+
+---
+
+## P1-1 checkpoint 持久化：图执行位置落 PostgreSQL
+
+**动机**：`checkpointer.ts` 导出了 `createCheckpointer()` 却全仓无人调用，`agent.processor.ts` 每个 job 都 `new MemorySaver()`。进程重启后 BullMQ 会重新拾起同一个 job，但内存里的图状态已经没了，于是整条生成从头再跑——这是「多轮记忆」与失败恢复里最实的一块短板。
+
+**改动**
+- `agent/src/checkpointer.ts`：`createCheckpointer(connectionString?)` 改为异步。有连接串时用 `PostgresSaver.fromConnString()` + `setup()` 幂等建表（`checkpoints` / `checkpoint_blobs` / `checkpoint_writes`），进程级共享同一个 saver（内部持有 pg.Pool，每 job 新建会打爆连接数）；没有连接串（单测、纯内存演示）仍退回 `MemorySaver`。建表失败不缓存坏 Promise，下一次 job 可以重试。新增 `resetCheckpointer()` 供测试清理。
+- `server/src/agent/agent.processor.ts`：注入 `ConfigService`，用 `app.databaseUrl` 构造 checkpointer，替换 `new MemorySaver()`。`thread_id` 沿用既有的 `thread-{projectId}-{runId}`，不需要迁移历史数据。
+- 不需要额外写「恢复扫描」：`AgentService.cancelStaleRuns()` 只清理 30 分钟前的 run，未完成的 BullMQ job 重启后会被重新消费，此时同 `thread_id` 的 checkpoint 已在库里，图从最后完成的节点继续。
+- `agent/src/__tests__/checkpointer.test.ts`（新，4 个用例）：无连接串降级、有连接串建表、并发共用同一实例、建表失败可重试。
+
+**验证**：agent 包 41 个测试全过（新增 4 个）。

@@ -1,7 +1,7 @@
 export { Phase2State } from "./state.js";
 export type { Phase2StateType } from "./state.js";
 export { buildPhase2Graph, phase2Graph } from "./graph.js";
-export { createCheckpointer } from "./checkpointer.js";
+export { createCheckpointer, resetCheckpointer } from "./checkpointer.js";
 
 // Agents
 export { BaseAgent } from "./agents/base.js";

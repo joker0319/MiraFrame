@@ -99,7 +99,7 @@
 
 **R** 刷新页面能从 DB 恢复等待状态；补第 5、6 镜头时只重跑渲染阶段，不用重跑文本和图片。
 
-**可能被追问**：checkpoint 存在哪？→ 诚实答：当前用 `MemorySaver`（`agent.processor.ts:51-52`），**进程内**，重启会丢执行位置；持久化的只有 run 状态、门位置和产物。见「诚实边界」。
+**可能被追问**：checkpoint 存在哪？→ PostgreSQL。`agent/src/checkpointer.ts` 用 `PostgresSaver.fromConnString()` + `setup()` 幂等建表，`thread_id = thread-{projectId}-{runId}`；进程重启后未完成的 BullMQ job 被重新拾起，图从最后完成的节点继续。只有单测或无数据库场景才退回 `MemorySaver`。
 
 ---
 
@@ -144,7 +144,7 @@
 | --- | --- | --- | --- |
 | 意图识别 | Director 把题材 + 用户反馈转成 `executionPlan`（`director.ts:99-137`） | 任务意图 → 受约束的执行计划，带 `planRationale` 可解释 | 没有独立的「用户意图分类器」，是规划而非分类 |
 | 工具调用 | `AgentContext` 暴露 `saveOutline` / `createShot` / `callLlm` 等方法 | 可以说清「工具层该长什么样」 | **当前没有 MCP**，是硬编码方法；不要说成接入了 MCP |
-| 多轮记忆 | `messages` 表 + Critic 的 `feedback` 跨轮回灌（`plan.ts:71-81`） | 反馈能改变下一轮生成，不是单轮问答 | checkpoint 是 `MemorySaver`，进程内；跨重启只保留产物和 run 状态 |
+| 多轮记忆 | `messages` 表 + Critic 的 `feedback` 跨轮回灌（`plan.ts:71-81`） | 反馈能改变下一轮生成，不是单轮问答 | 图 checkpoint 已落 PostgreSQL；`messages` 仍是拼接式上下文，不做滚动摘要 |
 | 多 Agent 路由 | Director 规划 + Review 的 `FALLBACK_ROUTE`（`review.ts:9-14,80-82`） | 模型决定路由，失败有白名单兜底 | 节点是类，不是独立进程/服务 |
 | Monitor 闭环 | 29 类 WS 事件（`packages/shared/src/constants/events.ts`）+ `run_*` 事件 + 评分写 state | 进度、门、产物、告警前端实时可见 | `critique_result` 事件定义了但服务端没有 emit |
 | LLM-as-Judge | Critic 四维 rubric + 阈值 + 轮次上限 + 人工兜底 | 真打分、真打回、真回灌 | 只审分镜文本，没审图片/视频 |
@@ -165,7 +165,7 @@
 四个 `interrupt` 门；执行器把门名落到 `agentRuns.awaitingGate`，前端靠 WS 恢复确认按钮，用户确认后通过 Redis 消息恢复图；历史门在续跑时自动置 approved。
 
 **Q4：断点恢复是真的持久化吗？**
-不是全部。产物、run 状态、门位置在 PostgreSQL；图的 checkpoint 目前是 `MemorySaver`，进程重启会丢执行位置，只能从门或阶段继续。这是我明确知道的技术债。
+产物、run 状态、门位置、图的 checkpoint 都在 PostgreSQL。进程重启后 BullMQ 重新拾起未完成的 job，同 `thread_id` 的 checkpoint 已存在，图从最后完成的节点继续；只有超过 30 分钟的残留 run 会被启动清理标记为 cancelled。
 
 **Q5：外部模型限流怎么处理？**
 文本 429：串行队列 + `Retry-After` + 指数退避；视频 503：可重试错误分类 + 退避封顶 120 秒；两者都有次数上限，耗尽后抛明确错误并保留已完成素材，配合 `target_stage` 续跑。
@@ -183,13 +183,13 @@
 EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 Agent 工程能力迁移到内容生成场景：其中 LLM-as-Judge、多 Agent 路由、Monitor 闭环是共通的；MCP 和多轮记忆在 MiraFrame 里还比较弱，是明确的下一步。
 
 **Q10：最大的技术债是什么？**
-checkpoint 非持久（MemorySaver）、`critique_result` 事件空定义、字幕是外挂 SRT 没烧进画面、i2i 修正目前是手动触发。DOUBAO 配置、宇宙页面残留、无鉴权配置接口等已在 P0 加固中清理完毕。这些都不影响主线演示，但面试被问到要承认。
+`critique_result` 事件空定义、字幕是外挂 SRT 没烧进画面、i2i 修正目前是手动触发、`messages` 仍是拼接式上下文没有滚动摘要。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
 
 ---
 
 ## 5. 诚实边界（主动交代比被问出来强）
 
-- **checkpoint**：`packages/agent/src/checkpointer.ts:5-14` 导出 `createCheckpointer()`，但全仓没人调用；实际用的是 processor 里 `new MemorySaver()`。进程重启丢的是「图执行到哪一步」，不是产物。
+- **checkpoint（P1-1 已修）**：`packages/agent/src/checkpointer.ts` 的 `createCheckpointer(connectionString)` 返回 `PostgresSaver` 并幂等建表，`agent.processor.ts` 用 `app.databaseUrl` 构造；无连接串时才退回 `MemorySaver`（单测路径）。
 - **`critique_result` 事件**：shared 里定义、前端监听，但服务端没有 emit；Critic 的结果目前只进图状态和消息流。
 - **MCP**：没有接入。Tool Registry 的接入点可以设计，但现在是硬编码 `AgentContext`。
 - **`CRITIC_SYSTEM_PROMPT`**（图像四维 rubric）定义了但 CriticAgent 没调用，当前只审分镜文本。

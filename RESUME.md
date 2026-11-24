@@ -165,8 +165,8 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 
 ## 7. 诚实红线（写了就是给自己挖坑）
 
-- **没做的**：MCP、独立意图分类器、图像/视频多模态 Critic、生产级 checkpoint 持久化、provider 智能选路、字幕烧录。（CI 已在 P0 补齐，跑 build / typecheck / 全量测试。）
-- **半成品**：checkpoint 目前是进程内 `MemorySaver`，重启丢的是「图执行到哪一步」，不是产物；`critique_result` 事件定义了但服务端未 emit；工具层只有大纲节点接入。
+- **没做的**：MCP、独立意图分类器、图像/视频多模态 Critic、provider 智能选路、字幕烧录。（checkpoint 持久化已在 P1-1 补齐，CI 已在 P0 补齐。）
+- **半成品**：`critique_result` 事件定义了但服务端未 emit；工具层只有大纲节点接入；`messages` 仍拼接式注入，没有滚动摘要。
 - **配置口径**：Critic 阈值统一为 `CRITIC_SCORE_THRESHOLD=6.0`（由 `agents/critic.ts` 读取），不再有 `CRITIQUE_*` 双前缀；启动期会校验数值合法性并告警。
 - **原型局限**：免费模型 + 本地 PostgreSQL/Redis；face-api 对半透明、背影、非人形参考图检不出脸；i2i 修正手动触发且会清空该镜视频。
 - **成本教训**：早期一次探测误用付费模型产生约 ¥17–27 费用，之后把 provider 全量配置化并定下「探测只读、最小单任务」规则 —— 这段适合口述，不适合写进简历。

@@ -1,14 +1,15 @@
 import { Processor, WorkerHost } from "@nestjs/bullmq";
 import { Job } from "bullmq";
 import { Inject, Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import Redis from "ioredis";
 import { REDIS_CLIENT, REDIS_SUBSCRIBER } from "../redis";
 import { DRIZZLE, type Db } from "../db";
 import { WsGateway } from "../ws";
 import { ImageService, TextService, VideoService, ConsistencyService } from "../services";
-import { buildPhase2Graph, setNodeContext, clearNodeContext, runWithNodeContext } from "@miraframe/agent";
+import { buildPhase2Graph, createCheckpointer, setNodeContext, clearNodeContext, runWithNodeContext } from "@miraframe/agent";
 import type { LlmChatMessage, ToolDefinition } from "@miraframe/agent";
-import { MemorySaver, Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
+import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { and, asc, eq } from "drizzle-orm";
 import { schema } from "../db";
 import type { GenerationInput } from "./agent.service";
@@ -27,6 +28,7 @@ export class AgentProcessor extends WorkerHost {
 	    @Inject(ImageService) private readonly imageService: ImageService,
 	    @Inject(VideoService) private readonly videoService: VideoService,
 	    @Inject(ConsistencyService) private readonly consistencyService: ConsistencyService,
+	    @Inject(ConfigService) private readonly config: ConfigService,
 	  ) {
     super();
   }
@@ -48,7 +50,8 @@ export class AgentProcessor extends WorkerHost {
     // Build the graph with checkpointer
     console.log(`[processor] Building graph...`);
     const graph = buildPhase2Graph();
-    const checkpointer = new MemorySaver();
+    // checkpoint 落 PostgreSQL：重启后同一个 job 被重新拾起时，从已完成节点继续
+    const checkpointer = await createCheckpointer(this.config.get<string>("app.databaseUrl"));
     const compiled = graph.compile({ checkpointer });
     console.log(`[processor] Graph compiled with ${Object.keys(graph).length} nodes`);
 

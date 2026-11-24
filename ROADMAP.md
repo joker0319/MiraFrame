@@ -99,6 +99,8 @@
 
 ### P1-1 checkpoint 持久化（首推）
 
+> **状态：已完成（2026-11-24）**。`createCheckpointer(connectionString)` 按 `DATABASE_URL` 返回 `PostgresSaver` 并幂等建表，processor 不再 `new MemorySaver()`；重启续跑靠 BullMQ 重拾 job + 同 `thread_id` 的 checkpoint，无需额外恢复扫描。下方保留原始方案与验收标准。
+
 - **动机**：`checkpointer.ts:5-7` 导出了 `createCheckpointer()` 但全仓无人调用；`agent.processor.ts:51-52` 仍 `new MemorySaver()`，进程重启丢图执行位置。这是六大考点里「多轮记忆」最实的短板，也是 Q4 必被追问的点。
 - **动作**：实现 PostgresSaver，用 `thread_id = projectId:runId` 存 checkpoint；图 `compile({ checkpointer })` 换成它；确认 `interrupt` 恢复走同一 thread。
 - **验收**：生成到一半重启后端，能从 DB 恢复到原节点继续执行；`awaitingGate` 与新 checkpoint 不冲突。
