@@ -22,7 +22,7 @@
 
 ### 结果数据（可引用）
 
-- 后端最近一次验证 **72 个测试全过**，全仓 `pnpm build` / `pnpm typecheck` 通过；源码中 **234 个测试用例**分布在四个包（含 P0 加固 18 个、并发上下文隔离 4 个、工具层与 MCP 44 个）。
+- 后端最近一次验证 **102 个测试全过**，全仓 `pnpm build` / `pnpm typecheck` 通过；源码中 **264 个测试用例**分布在四个包（含 P0 加固 18 个、并发上下文隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个）。
 - 项目共 **42 个提交**（含文档提交）；一致性相关三次提交 `dfbfcb0 → c5fc8f7 → 7037473` 对应「检测 → 自动接入流水线 → 反哺修正」三步演进。
 - 真实运行：project-23 **6 镜头 / 3 角色**，一致性端到端 **1.85 秒**；续跑 run 51 结果 `ok=2 review=4 drift=0`。
 - i2i 反哺对照：沈鸢人脸距离从灰区约 **0.4 → 0.22**；临时项目端到端实测 **0.2562，判定 ok**。
@@ -145,7 +145,7 @@
 | --- | --- | --- | --- |
 | 意图识别 | Director 把题材 + 用户反馈转成 `executionPlan`（`director.ts:99-137`） | 任务意图 → 受约束的执行计划，带 `planRationale` 可解释 | 没有独立的「用户意图分类器」，是规划而非分类 |
 | 工具调用 | `ToolRegistry` + `ToolLoop` 模型自主选工具；`tools/langchain-bridge.ts` 与 LangChain `tool()` 双向互通；`tools/mcp/` 主用官方 `@langchain/mcp-adapters`（1.0.1），并保留按 MCP 规范自实现的 stdio 客户端作兜底，两条连接层契约一致、可切换 | 能讲清「工具描述 → 模型决策 → 执行 → 结果回填」闭环，以及本地工具、远端 MCP 工具、官方 SDK 与自实现如何统一 | 目前只有大纲节点挂了远端工具；MCP 是可选增强 |
-| 多轮记忆 | `messages` 表 + Critic 的 `feedback` 跨轮回灌（`plan.ts:71-81`） | 反馈能改变下一轮生成，不是单轮问答 | 图 checkpoint 已落 PostgreSQL；`messages` 仍是拼接式上下文，不做滚动摘要 |
+| 多轮记忆 | `messages` 表按轮分组注入 + **滚动摘要**（`conversation-memory.ts`：滑出窗口的旧轮次增量折叠成摘要，`coveredThroughId` 保证每轮只折一次）+ 图 checkpoint 落 PostgreSQL | 长会话不会因为截断丢掉早期偏好；摘要失败也不阻断生成 | 摘要仍是单次 LLM 压缩，没有做向量检索式长期记忆 |
 | 多 Agent 路由 | Director 规划 + Review 的 `FALLBACK_ROUTE`（`review.ts:9-14,80-82`） | 模型决定路由，失败有白名单兜底 | 节点是类，不是独立进程/服务 |
 | Monitor 闭环 | 29 类 WS 事件（`packages/shared/src/constants/events.ts`）+ `run_*` 事件 + `critique_result` 评分实时下发 + 评分写 state | 进度、门、产物、告警、评分前端实时可见 | 事件是进程内广播，没有做多实例的 Redis adapter |
 | LLM-as-Judge | Critic 四维 rubric + 阈值 + 轮次上限 + 人工兜底 | 真打分、真打回、真回灌 | 只审分镜文本，没审图片/视频 |
@@ -181,10 +181,10 @@
 全栈 TS：前端纸墨设计系统（语义 token + reduced-motion + 双主题）、工作台与一致性面板；后端 NestJS 服务（TTS 混流、face-api 初始化、i2i 反哺）；Agent 层的状态契约和 WS 事件类型也参与对齐。分工上重点在「把工程化保障做实」。
 
 **Q9：和你的 EchoMind 项目是什么关系？**
-EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 Agent 工程能力迁移到内容生成场景：LLM-as-Judge、多 Agent 路由、Monitor 闭环是共通的；MCP 在 MiraFrame 里用真实素材库 server 落了地，连接层主用官方 `@langchain/mcp-adapters`，多轮记忆仍是拼接式上下文，是明确的下一步。
+EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 Agent 工程能力迁移到内容生成场景：LLM-as-Judge、多 Agent 路由、Monitor 闭环是共通的；MCP 在 MiraFrame 里用真实素材库 server 落了地（连接层主用官方 `@langchain/mcp-adapters`），多轮记忆做了增量滚动摘要，六大考点都有对应实现。
 
 **Q10：最大的技术债是什么？**
-`critique_result` 事件**已补齐**（P1-2：Critic 每轮评审后经 WS 下发评分、阈值、轮次与打回原因，前端节点详情渲染评分卡片）；`_nodeCtx` 全局兜底**已删除**（P1-4：节点上下文只走 ALS，取不到直接报错）。剩余技术债是字幕外挂 SRT 没烧进画面、i2i 修正目前是手动触发、`messages` 仍是拼接式上下文没有滚动摘要、WS 是进程内广播没接 Redis adapter。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
+`critique_result` 事件**已补齐**（P1-2：Critic 每轮评审后经 WS 下发评分、阈值、轮次与打回原因，前端节点详情渲染评分卡片）；`_nodeCtx` 全局兜底**已删除**（P1-4：节点上下文只走 ALS，取不到直接报错）。剩余技术债是字幕外挂 SRT 没烧进画面、i2i 修正目前是手动触发、长期记忆只是单段摘要（没有向量检索、跨项目不复用）、WS 是进程内广播没接 Redis adapter。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
 
 **Q11：BullMQ 并发 8，怎么保证项目之间不串号？**
 上下文不走模块级全局变量，只走 `AsyncLocalStorage`：processor 用 `runWithNodeContext(ctx, () => compiled.invoke(...))` 把每个 job 的 ctx 绑定在自己的异步链上，节点里 `getNodeCtx()` 只从 ALS 取。早先这里有个 `_nodeCtx` 全局兜底 + 取不到就返回 mock（`callLlm` 吐 `"{}"`），并发下会串号、且静默产出空结果还显示成功——现在取不到直接抛 `[agent:ctx] 图节点拿不到 AgentContext`。模块级共享的只有两类东西：Agent 实例（只持有 `readonly name`，无状态）和 checkpointer 单例（内部是 pg 连接池，本来就该复用，不持有项目上下文）。测试用 8 个不同 `projectId` 并发跑 Critic 节点、故意错开 LLM 延迟，断言每份回报的 issues/suggestions 都来自它自己的 job。
@@ -209,6 +209,22 @@ EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 
 
 工程细节上还有两点：一是 MCP 是**可选增强**，`createAssetsToolKit()` 拉不起进程就返回 null，节点照常跑；二是构建坑——tsup 是 bundle 模式，`.mjs` 子进程脚本不会进 dist，而生产镜像「只拷 dist」，所以加了 `scripts/copy-mcp-servers.mjs`，否则 `node dist` 形态下 MCP 永远降级。
 
+**Q13：长会话的记忆怎么管？为什么不是简单截断？**
+
+因为截断会把「最早的偏好」整段丢掉，而用户的反馈恰恰是指代性的：「改回第一版」——第一版是什么，只有历史里有。所以做的是**增量滚动摘要**：
+
+- 消息按「用户发言 = 一轮的开始」分组（`conversation-memory.ts` 的 `groupConversationTurns`）；
+- 最近 `keepTurns`（默认 5）轮保留原文，更早的轮次被折叠进一段摘要；
+- 折叠用 `coveredThroughId` 记录「摘要覆盖到哪条消息」，每轮只折叠一次，不会重复烧钱；
+- 新内容是**与旧摘要合并**后输出完整摘要，不是简单追加（否则摘要会越堆越乱）；
+- 内容太少（默认 < 600 字）就先攒着，不值得为两句话调一次模型。
+
+prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近几轮原文在后，并明确「两者冲突时以原文为准」——摘要可能失真，原文不会。
+
+工程上最值得说的是**失败语义**，一共三条：记忆表还没建（迁移没跑）→ 当空记忆静默降级；模型调用失败 → 沿用旧摘要、不阻断生成；模型返回空 → 不覆盖旧摘要，宁可保留旧的也不要一次坏调用清空长期记忆。长期记忆系统最容易出的事故就是「摘要器挂了，把记忆写成空」，这里用 `applyMemoryPlan` 返回 null 挡住了。
+
+还有两个细节：`coveredThroughId` 用 `Math.max(旧值, 新值)` 保证只前进不后退（job 重放时不会重复折叠）；`keepTurns` 与 `minChars` 都走环境变量（`MIRAFRAME_MEMORY_KEEP_TURNS` / `MIRAFRAME_MEMORY_MIN_CHARS`），测试里可以精确控制。验收是真实 Postgres 跑一次：6 轮对话 → 折叠第 1-3 轮、`covered_through_id` 落库、prompt 里只剩 4-6 轮原文 + 摘要，删项目级联清掉记忆行。
+
 ---
 
 ## 5. 诚实边界（主动交代比被问出来强）
@@ -218,6 +234,7 @@ EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 
 - **MCP（P1-3 已接，连接层已换官方 SDK）**：默认走 `@langchain/mcp-adapters@1.0.1` 的 `MultiServerMCPClient`，`tools/mcp/client.ts`（自实现 JSON-RPC over stdio）保留为 `transport: builtin` 兜底，`MIRAFRAME_MCP_TRANSPORT` 可切。`servers/assets-server.mjs` 是配套的真实素材库 server，拦截路径穿越与 `.env`/密钥类文件。钉 1.0.1 是因为 2.x 要求把 core 升到 ^1.2.6、langgraph 升到 ^1.4.18，为增强能力动 Agent 骨架不划算。仍只有大纲节点挂了远端工具，且 MCP 是可选增强——拉起失败自动降级，主流程不受影响。
 - **`CRITIC_SYSTEM_PROMPT`**（图像四维 rubric）定义了但 CriticAgent 没调用，当前只审分镜文本。
 - **残留（P0 已清理）**：`DOUBAO_*` 配置与 `app.config.ts` 里的兜底字段、`UniversesPage.tsx` / `UniverseDetailPage.tsx` / `universesApi.ts` 均已删除；宇宙路由保留重定向以免旧链接 404。`config/` 接口已加 `ADMIN_TOKEN` 守卫，CORS 收紧为白名单，明文 `reveal` 接口移除。
+- **长期记忆的边界**：`conversation_memory` 每个项目一行，存的是单段摘要，没有向量检索、不能跨项目复用；摘要质量依赖模型，`keepTurns=5` 之外的细节只剩压缩后的一句。真要做得更细，应该按「角色设定 / 分镜决定 / 风格偏好」分槽存储，而不是一段散文。
 - **face-api 局限**：半透明、背影、非人形参考图检不出脸，标 `no_reference`，不误判但也无法校验。
 - **i2i 修正**：手动触发，且会清空该镜视频，需要重新合成才会更新成片。
 - **成片字幕**：外挂 `final.srt`，没有烧录进画面。

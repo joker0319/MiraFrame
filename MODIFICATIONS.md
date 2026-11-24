@@ -478,3 +478,41 @@ MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径�
 另外用 `node` 直接加载 `dist/index.js` 验证过构建产物形态：`transport: sdk`、`serverInfo` 正确、能列真实 `docs` 目录，且素材库日志里出现 `initialize from @langchain/mcp-adapters` —— 确认走的确实是官方 SDK 而不是兜底路径。
 
 **保留自实现客户端的理由**：两条连接层契约一致、都有测试覆盖，SDK 因版本或环境问题不可用时不至于整个功能消失；`MIRAFRAME_MCP_TRANSPORT=sdk|builtin|auto` 可显式切换。这不是冗余 —— 而是「能力可降级」的同一原则在连接层的延续。
+
+---
+
+## 多轮记忆：从「拼接最近 N 轮」到「增量滚动摘要」
+
+**动机**：历史上下文此前是把最近 5 轮原文拼进 prompt，超出就硬截断（`…（历史已截断）`）。用户说「改回第一版但保留结尾」时，只要第一版滑出窗口，模型就失去指代对象 —— 而这正是多轮记忆考点最典型的失败。
+
+**设计（为什么是「滚动」而不是「每轮重新总结」）**
+
+| 方案 | 问题 |
+| --- | --- |
+| 每次任务把全部历史重新总结一遍 | 重复烧钱，且摘要不可复现（同一段历史今天压出来和昨天不一样） |
+| 只保留最近 N 轮原文 | 就是旧做法，早期偏好会丢 |
+| **增量折叠 + 游标** | 每轮只折叠一次，摘要随会话单调生长，成本与消息量线性而非平方 |
+
+**改动**
+- `db/schema.ts` + `drizzle/0003_broad_starbolt.sql`：新增 `conversation_memory`（`project_id` 主键、`summary`、`covered_through_id`、`covered_turns`、`updated_at`，级联删除）。
+- `agent/conversation-memory.ts`（纯函数，无 IO）：`groupConversationTurns`（用户发言 = 轮次起点）、`planMemoryUpdate`（判断该不该折、折到哪）、`serializeTurnsForSummary`、`buildSummaryPrompt`（与旧摘要合并而非追加）、`applyMemoryPlan`、`renderMemoryBlock`、`readMemoryConfig`。
+- `agent/conversation-memory.store.ts`：抽出 `MemoryStore` 接口 + drizzle 实现（`onConflictDoUpdate` 幂等 upsert）。抽接口是为了让编排逻辑可单测，不必伪造 drizzle 链式查询。
+- `agent/conversation-memory.service.ts`：编排 `ensure()`，三条失败语义见下。
+- `agent/agent.module.ts`：工厂装配，把「存储」与「摘要模型」作为两个依赖出入，单测可 `new ConversationMemoryService(fakeStore, fakeSummarizer)`。
+- `agent/agent.processor.ts`：读消息时带上 `id`、扫描上限 60 → 120；先 `ensure()` 再 `buildConversationHistory({ memorySummary, coveredThroughId })`。
+- `agent/agent-run-state.ts`：`buildConversationHistory` 支持按 `coveredThroughId` 跳过已折叠轮次；超长时**从最旧的整块开始丢**（下一轮就会被折叠），最后才硬截断，保证最近一轮永远不被切掉。
+- `services/text.service.ts`：fake provider 增加 `memory` 分支，本地 fake 模式也能演示记忆链路。
+
+**三条失败语义（都刻意不抛）**
+1. 记忆表不存在（迁移没跑）→ 打一条提示、当空记忆，生成照常；
+2. 模型调用失败 → 沿用旧摘要，历史上限逻辑兜底；
+3. 模型返回空 → `applyMemoryPlan` 返回 null，**不覆盖**旧摘要。远端摘要器故障时把记忆写成空，是这类系统最常见的事故。
+
+另外 `coveredThroughId` 取 `Math.max(旧, 新)`：job 重放、并发重入都不会把游标推回去重复折叠。
+
+**验证**
+- 单测 30 个（`conversation-memory.test.ts`）：分组、窗口判定、阈值攒批、游标不重复折叠、`excludeLatestUser` 不提前折叠当前轮、序列化截断、prompt 合并语义、空输出不清空、超长截断、配置夹取、服务层 6 种路径、以及与 `buildConversationHistory` 的联动。
+- 真实 Postgres 跑通一遍：6 轮对话 → 折叠第 1-3 轮、`covered_through_id=388` 落库、prompt 里只剩第 4-6 轮原文 + 摘要块、重复调用 `updated=false`、删项目后记忆行与消息级联清零。
+- 全仓 **264 个测试全过**（shared 60 / agent 92 / server 102 / frontend 10），`pnpm build` / `pnpm typecheck` 通过。
+
+**没做**：token 预算按模型上下文动态分配（目前是固定字符上限）；长期记忆只是单段散文，没有分槽（角色设定 / 分镜决定 / 风格偏好）或向量检索，跨项目不复用。
