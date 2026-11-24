@@ -559,3 +559,45 @@ MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径�
 **顺手修的工程问题**：根 `package.json` 的 `test` 是 `vitest run`，而 `vitest.workspace.ts` 在 vitest 4 已不再被读取（CI 用的是 `pnpm -r test`，所以一直没暴露）。根目录直接跑会收集所有包但用根配置，导致 `@/` 别名与 `MIRAFRAME_MCP_ASSETS=0` 都失效。改为 `test: pnpm -r test`（与 CI 一致），删掉失效的 `vitest.workspace.ts`。
 
 **没做**：按成本/延迟动态加权的负载均衡（当前是静态优先级 + 熔断）；熔断状态跨进程共享（多实例各算各的，要做得上 Redis）；协议仍按 baseUrl 嗅探，新增特殊协议的供应商还要改代码。候选名默认 `openai` 的规则也值得注意：只写 `TEXT_PROVIDERS=a,b` 而忘了 `TEXT_PROVIDER` 时按 OpenAI 兼容处理，不会静默变成 fake。
+
+---
+
+## i2i 自动联动：把「人点按钮」换成「有闸门的闭环」
+
+**动机**：一致性链路的第三步一直是手动。检测是自动的（`generateShotFrames` 末尾跑 `autoCheckConsistency`，结果写回 `shot` 并广播），修复能力也早就写好了（`ShotRepairService.repairWithReferences`，有单测、有路由、有面板按钮），唯独中间那一步没人接。结果是「自动发现漂移 → 亮个红点 → 等人来点」，闭环缺了最后一环。
+
+**为什么不做成无限制自动**：一致性判定本身有波动，重画又是按张计费。无上限的自动修复会在一个本来就判不准的指标上反复花钱，还会出现「修脸把构图修坏 → 再修 → 来回震荡」。所以做的是**有预算、有闸门、可关**的自动版本，手动面板保留为兜底。
+
+**三层结构**
+
+| 层 | 文件 | 职责 |
+| --- | --- | --- |
+| 策略（纯函数） | `services/auto-repair.ts` | 读配置、判断图像服务可用性、选片与排序、逐张执行并判定是否修好 |
+| 编排 | `agent/agent.processor.ts` 的 `autoRepairDriftedShots` | 查绑定关系、组装候选、调服务、广播结果 |
+| 执行（复用） | `services/shot-repair.service.ts` | 取参考图、拼保脸提示词、走 i2i、换图、清视频、复检 |
+
+**三道闸（按成本从低到高）**
+
+1. `MIRAFRAME_AUTO_REPAIR`（默认开）+ `MIRAFRAME_AUTO_REPAIR_MAX_SHOTS`（默认 2，上限 10，设 0 等于只告警不修）。
+2. **图像服务是否真能出图**：`isImageRepairAvailable()` 解析候选链，要求至少一家「非 fake 且带 key」。
+3. **这一轮有没有漂移**：只修 `verdict=drift`，灰区 `review` 不修。
+
+**两个被测试和环境逼出来的修正**
+
+1. **占位图陷阱（最危险的一个）**：`generateImage` 在 fake provider 或没配 key 时**不抛错，而是静默返回 `data:` 占位图**。第一版没有这道闸，跑通之后才发现「修复」会把一张真图换成灰底占位图、还顺手清掉视频。修法两层：编排层先判 provider 可用性；`shot-repair.service.ts` 在写库前检查返回值是否 `data:` 开头，是就抛错、原图不动。
+2. **`unverifiable` 不算修好**：复检判定有四种，最初写成「不是 drift 就算修好」，于是「没检出人脸」也被报成已恢复——那等于没有证据却宣称修好了。改成只有 `ok` / `review` 算 resolved。
+
+**预算怎么花**：按漂移程度从重到轻排序（取该镜头里 `distance` 最大的角色），取前 N 个；每个镜头在计划里只出现一次，所以不存在同一张图被反复重画。排序并列时按镜头顺序，保证日志可复现。
+
+**位置上的一个巧合，正好省掉一次重合成**：修复挂在 `generateShotFrames` 末尾、`generateShotVideos` 之前，所以视频阶段拿到的就是新图。`repairWithReferences` 清空 `videoUrl` 在这里不是代价而是正确性保证——万一是有部分视频的续跑场景，旧视频也不会配着新图留下来。
+
+**观测**：新增 `consistency_repair_completed` 事件（snake_case，带 `repaired` / `skipped` / `failed`；`skipped` 的 reason 是 `not_drift | no_references | over_budget`）。前端收下后写入消息流：「已按参考图重画 N 个镜头，M 个已恢复」。同时在每个修复成功的镜头上补发 `shot_updated`，因为修复服务只改库不广播，前端不刷新就能看到新图。
+
+**验证**
+- 25 个策略用例（`auto-repair.test.ts`）：配置解析、provider 可用性四类、`worstDistance` 取值、选片（只修 drift / 无参考图跳过 / 按漂移排序 / 预算截断 / 预算 0）、执行（成功 / 仍漂移 / 复检失败 / 单张失败继续 / 跳过原因回传）、参考图收集（每角色 3 张、整镜 4 张、去重、无图返回空）。
+- 7 个编排用例（`consistency-auto-repair.test.ts`）：直接 new `AgentProcessor` + 链式查询替身，覆盖 fake 跳过、缺 key 跳过、开关关闭、正常修复并广播两个事件、预算只修最严重的那张、无漂移不动作、修复失败只记录不改图。
+- 4 个契约用例（shared `ws-events.test.ts`）：接受 snake_case、`verdict` 允许 null、拒绝 camelCase、拒绝未知 reason。
+- 本地端到端（真实 HTTP 图生图服务 + 真实 `ImageService` / `ConsistencyService`，人脸模型按图片字节区分参考图/旧图/新图）：请求体 `extra_body.image` 带上了参考图、提示词带「第 1 张：沈鸢」、返回新图后写库并清空 `videoUrl`、复检 `ok`、事件 `shot_updated → consistency_repair_completed{resolved:true}`；HTTP 轨迹 `POST /v1/images/generations → GET ref.png → GET fixed.png`。
+- 全仓 **334 个测试全过**（shared 64 / agent 92 / server 168 / frontend 10），`pnpm build` / `pnpm typecheck` 通过。
+
+**没做**：预算是「每次跑」而不是「全项目总量」，长项目反复续跑仍可能累计花钱；没有跨进程共享预算（多 worker 各修各的，要做得上 Redis）；`ENABLE_IMAGE_TO_IMAGE` 这个老开关目前仍不参与判定（自动修复盯的是 provider + key，因为那个开关既不拦手动路径也不拦生成路径）；修不好只标红不自动降级重写提示词。

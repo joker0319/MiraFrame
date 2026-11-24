@@ -3,7 +3,7 @@
 > 数据截至 2026-11-24，代码基线 `82ae3d4`（42 个提交）。
 > 配套：[RESUME.md](./RESUME.md)（简历写法）、[INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md)（面试口述）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）。
 > 工期单位沿用 `multi-agent-upgrade-plan.md` 的「晚」（每天 2–3 小时）。
-> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理、P1-3 工具层/MCP 也已完成**，下方各节保留为实施记录与验收依据。**更新 2026-11-25：P2 的滚动摘要与 provider 选路/降级已完成**；剩余待办是 P1-5（前端测试扩充，已从 4 个加到 10 个）与 P2 的多模态 Critic、字幕烧录、i2i 自动联动。
+> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理、P1-3 工具层/MCP 也已完成**，下方各节保留为实施记录与验收依据。**更新 2026-11-25：P2 的滚动摘要、provider 选路/降级、i2i 自动联动已完成**；剩余待办是 P1-5（前端测试扩充，已从 4 个加到 10 个）与 P2 的多模态 Critic、字幕烧录。
 
 ---
 
@@ -50,7 +50,7 @@
 
 ### 面试指南「诚实边界」复核
 
-`INTERVIEW_GUIDE.md` §5 的八条里，**七条仍成立**（checkpoint 用 `MemorySaver`、`critique_result` 未 emit、MCP 未接、图像 rubric 未调用、宇宙文件残留、字幕外挂、i2i 手动）。
+`INTERVIEW_GUIDE.md` §5 的八条里，**三条仍成立**（图像 rubric 未调用、宇宙文件残留、字幕外挂）；checkpoint 持久化、`critique_result` 下发、MCP 接入、i2i 自动联动已在 P1/P2 中补齐。
 
 **一条需要修正**：原文写「`.env` 里 5 行 `DOUBAO_*` 配置已无代码消费」不准确 —— `config/app.config.ts:101-106` 读入 6 个字段，`video.service.ts:36,40,75,85,86` 把 `doubaoApiKey`/`doubaoVideoModel` 当作兜底值、`doubaoVideoDuration`/`doubaoVideoRatio` 当作默认参数消费；准确说法是「作为 legacy 兜底被读取，但没有独立 doubao provider 分支」。`DOUBAO_GENERATE_AUDIO` 确实无人消费。本轮已同步修正该文档。
 
@@ -153,7 +153,7 @@
 | **provider 选路 / 降级** | **已完成（2026-11-25）**：`provider-routing.ts` 解析候选链（`TEXT_PROVIDERS=agnes,kimi`，scoped 变量覆盖通用值），连续失败熔断 + 指数冷却 + half-open 探测，按错误类型决定是否切换（401/403/429/5xx 切，400/422 不切也不计熔断），`GET /api/v1/providers` 输出只读健康快照。剩余：无成本/延迟加权，熔断状态不跨实例 | `services/provider-routing.ts`、`services/{text,image,video}.service.ts`、`modules/config/providers.controller.ts` | 主 provider 连续失败自动切备用并记日志（34 个用例 + 本地双 server 端到端验证） |
 | **多轮记忆** | ~~`messages` 只被拼成 contextBlock~~ → **滚动摘要已完成**（2026-11-25）：`conversation-memory.ts` 增量折叠旧轮次、`conversation_memory` 表存摘要与 `coveredThroughId` 游标；剩余 token 预算装配与反馈意图分类 | `agent-run-state.ts`、`agent/conversation-memory*.ts` | 长会话下反馈能跨 5 轮保持连贯，且 prompt 不超预算 |
 | **字幕烧录** | 成片字幕仍是外挂 `final.srt`（`video.service.ts:195-196`），无 `subtitles`/`libass` 滤镜 | `services/video.service.ts` | 输出内嵌中文字幕的 mp4（需处理容器字体） |
-| **i2i 自动修正 + 视频联动** | 目前手动触发（`projects.controller.ts:193-200`），且重画会清空 `videoUrl`（`shot-repair.service.ts:78`）需手动重合成 | `agent.processor.ts` 自动校验后、`shot-repair.service.ts` | drift 经确认后自动重画并重合成该镜视频 |
+| **i2i 自动修正** | **已完成（2026-11-25）**：一致性校验检出 `drift` 后自动按角色参考图重画并复检，重画在生视频之前完成，所以该镜视频直接用新图生成、不需要额外重合成。闸门三道：`MIRAFRAME_AUTO_REPAIR` 开关、图像 provider 必须是「非 fake 且有 key」（否则 `generateImage` 会静默返回占位图）、单轮预算 `MAX_SHOTS`（默认 2，按漂移程度从重到轻取）。手动面板保留为兜底 | `services/auto-repair.ts`、`agent/agent.processor.ts`、`shared/src/types/ws-events.ts` | 漂移自动重画 + 复检 + `consistency_repair_completed` 回执（32 个用例 + 本地真实 HTTP 图生图端到端） |
 | **WS 事件版本与去重** | `ws.gateway.ts:37-45` 直接 `emit`，29 类事件无版本/事件 ID/去重，前端靠 `socket.off` 防重复注册 | `ws.gateway.ts`、`shared/src/constants/events.ts` | 重连后不重复应用同一事件 |
 | **face-api 注释与实现对齐** | `face.service.ts:11-16` 注释仍写「显式切到 cpu 最稳」，实现已是优先 wasm、失败回退 cpu | `face.service.ts` | 注释与实现一致 |
 
@@ -163,7 +163,7 @@
 
 - **分布式锁 / 多租户 / K8s / 服务拆分**：原型定位，会稀释「全栈 TS + Agent 工程化」这条主线，且没人会问。
 - **重写成 Python**：会毁掉「前端转 Agent、全栈 TypeScript」的叙事一致性，也是你相对其他候选人的差异化。
-- **把 i2i 改成全自动**：一致性判定有波动，自动重画会静默消耗生成额度；保留人工确认反而是可讲的产品判断。
+- **把 i2i 改成无闸门的全自动**：一致性判定有波动，无限制重画会静默消耗生成额度。现在已经做了「有预算、有闸门、可关」的自动版本（单轮上限 + 图像服务可用性检查 + 复检兜底），不建议做的是不设上限的那种；人工面板继续保留，用于自动修不好的镜头。
 - **继续加新页面 / 新模块**：功能边际收益已经很低，时间投到 P1 的「把已有能力坐实」上回报更高。
 - **为凑简历补一堆空壳 MCP server / 新 Agent 类**：面试一追问就露馅，不如一个真实调用。
 

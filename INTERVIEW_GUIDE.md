@@ -18,11 +18,11 @@
 
 1. **决策层**：Director 用 LLM 产出 `executionPlan`，但阶段走白名单 + 必需阶段约束，模型只能在一定范围内裁量；Critic 按四维 rubric 给分，不通过就把 issues/suggestions 写回 `feedback`，PlanAgent 下一轮直接消费；ReviewAgent 在用户反馈后决定回流到哪个阶段。
 2. **执行层**：LangGraph 状态图串起 6 个生产节点和 4 个人工门；门的等待位置落到 DB 的 `awaitingGate`，靠 Redis 的 confirm 消息恢复；续跑用 `target_stage` 从指定阶段切入，已完成素材不重生成。
-3. **保障层**：文本 429 用进程级串行队列 + `Retry-After` + 指数退避；视频 503/`queue_full` 分类重试、封顶 120 秒；这些是「同一家内的重试」，再往上一层是候选链 + 熔断（连续失败切备用、指数冷却、half-open 探活），应对密钥失效/账号欠费这类重试救不回来的故障；一致性用 face-api wasm（9 张图 1.8 秒，比 cpu 快约 23 倍）+ 贪心指派避免多角色抢脸；漂移镜头可用角色参考图走 i2i 反哺。前端通过 29 类 WS 事件实时看到进度、门、产物和告警。
+3. **保障层**：文本 429 用进程级串行队列 + `Retry-After` + 指数退避；视频 503/`queue_full` 分类重试、封顶 120 秒；这些是「同一家内的重试」，再往上一层是候选链 + 熔断（连续失败切备用、指数冷却、half-open 探活），应对密钥失效/账号欠费这类重试救不回来的故障；一致性用 face-api wasm（9 张图 1.8 秒，比 cpu 快约 23 倍）+ 贪心指派避免多角色抢脸；漂移镜头自动按角色参考图走 i2i 重画并复检（有开关、有单轮预算、图像服务不可用时自动跳过）。前端通过 29 类 WS 事件实时看到进度、门、产物和告警。
 
 ### 结果数据（可引用）
 
-- 后端最近一次验证 **136 个测试全过**，全仓 `pnpm build` / `pnpm typecheck` 通过；源码中 **298 个测试用例**分布在四个包（含 P0 加固 18 个、并发上下文隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个、provider 选路 34 个）。
+- 后端最近一次验证 **168 个测试全过**，全仓 `pnpm build` / `pnpm typecheck` 通过；源码中 **334 个测试用例**分布在四个包（含 P0 加固 18 个、并发上下文隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个、provider 选路 34 个、i2i 自动修复 32 个）。
 - 项目共 **58 个提交**（含文档提交）；一致性相关三次提交 `dfbfcb0 → c5fc8f7 → 7037473` 对应「检测 → 自动接入流水线 → 反哺修正」三步演进。
 - 真实运行：project-23 **6 镜头 / 3 角色**，一致性端到端 **1.85 秒**；续跑 run 51 结果 `ok=2 review=4 drift=0`。
 - i2i 反哺对照：沈鸢人脸距离从灰区约 **0.4 → 0.22**；临时项目端到端实测 **0.2562，判定 ok**。
@@ -134,7 +134,7 @@
 2. **判定 + 自动接入**（`c5fc8f7`）：`consistency.ts:126-161` 用「全局最近优先的贪心指派」处理多角色同框，一张脸只归一个角色；阈值 0.45 / 0.6（`:38-42`）；参考图检不出脸标 `no_reference`，不算失败。`agent.processor.ts:502-504` 把校验挂在 `generateShotFrames()` 末尾，模型或下载失败只 warn、不阻断流水线；结果写回 `shot.consistency_result`，节点卡对 `drift` 亮红点。
 3. **反哺**（`7037473`）：`packages/server/src/services/shot-repair.service.ts:29-98` 取绑定角色的参考图（每角色 3 张、全镜 4 张），拼「第 N 张是某某、保留原分镜、不要加角色」的提示词（`buildRepairPrompt()` `:105-115`），走 Agnes i2i 重画；`packages/server/src/services/image.service.ts` 的 `buildAgnesImageBody()` 把参考图放进 `extra_body.image`（`response_format` 也必须在 `extra_body`，放顶层会报错），只重检这一张。
 
-**R** project-23 端到端 1.85 秒；沈鸢在 4 个镜头 0.36–0.41、2 个镜头 0.46，i2i 对照后降到 0.22；临时项目端到端跑通 0.2562 / `ok`，并广播 `shot_updated`。
+**R** project-23 端到端 1.85 秒；沈鸢在 4 个镜头 0.36–0.41、2 个镜头 0.46，i2i 对照后降到 0.22；临时项目端到端跑通 0.2562 / `ok`，并广播 `shot_updated`。第三步原先是人点按钮，现在由 `autoRepairDriftedShots` 自动串联（见 Q15）。
 
 **可能被追问**：为什么不用多模态 LLM 直接判一致性？→ face-api 给的是可复现的数值距离和阈值，适合做门限和回归；LLM 判断难量化。Agent 的评估角色交给 Critic 审文本，人脸这种几何特征交给专用模型，各自做擅长的事。
 
@@ -185,7 +185,7 @@
 EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 Agent 工程能力迁移到内容生成场景：LLM-as-Judge、多 Agent 路由、Monitor 闭环是共通的；MCP 在 MiraFrame 里用真实素材库 server 落了地（连接层主用官方 `@langchain/mcp-adapters`），多轮记忆做了增量滚动摘要，六大考点都有对应实现。
 
 **Q10：最大的技术债是什么？**
-`critique_result` 事件**已补齐**（P1-2：Critic 每轮评审后经 WS 下发评分、阈值、轮次与打回原因，前端节点详情渲染评分卡片）；`_nodeCtx` 全局兜底**已删除**（P1-4：节点上下文只走 ALS，取不到直接报错）；provider 选路/降级**已补齐**（P2：候选链 + 熔断 + 只读健康端点，见 Q14）。剩余技术债是字幕外挂 SRT 没烧进画面、i2i 修正目前是手动触发、长期记忆只是单段摘要（没有向量检索、跨项目不复用）、WS 是进程内广播没接 Redis adapter。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
+`critique_result` 事件**已补齐**（P1-2：Critic 每轮评审后经 WS 下发评分、阈值、轮次与打回原因，前端节点详情渲染评分卡片）；`_nodeCtx` 全局兜底**已删除**（P1-4：节点上下文只走 ALS，取不到直接报错）；provider 选路/降级**已补齐**（P2：候选链 + 熔断 + 只读健康端点，见 Q14）。i2i 自动联动**已补齐**（P2：漂移自动重画 + 复检 + 回执，见 Q15）。剩余技术债是字幕外挂 SRT 没烧进画面、长期记忆只是单段摘要（没有向量检索、跨项目不复用）、WS 是进程内广播没接 Redis adapter。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
 
 **Q11：BullMQ 并发 8，怎么保证项目之间不串号？**
 上下文不走模块级全局变量，只走 `AsyncLocalStorage`：processor 用 `runWithNodeContext(ctx, () => compiled.invoke(...))` 把每个 job 的 ctx 绑定在自己的异步链上，节点里 `getNodeCtx()` 只从 ALS 取。早先这里有个 `_nodeCtx` 全局兜底 + 取不到就返回 mock（`callLlm` 吐 `"{}"`），并发下会串号、且静默产出空结果还显示成功——现在取不到直接抛 `[agent:ctx] 图节点拿不到 AgentContext`。模块级共享的只有两类东西：Agent 实例（只持有 `readonly name`，无状态）和 checkpointer 单例（内部是 pg 连接池，本来就该复用，不持有项目上下文）。测试用 8 个不同 `projectId` 并发跑 Critic 节点、故意错开 LLM 延迟，断言每份回报的 issues/suggestions 都来自它自己的 job。
@@ -246,7 +246,31 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 
 边界也要说清楚：这是**静态优先级 + 熔断**，不是按成本/延迟动态加权的负载均衡，也没有跨进程共享熔断状态（多实例各算各的，要做得上 Redis）。真要做「成本驱动」，得先有按 token 计费的账本，那是另一个工程量级。
 
+**Q15：漂移自动修，怎么保证不烧钱、不来回震荡？**
+
+原来的第三步是「人点按钮」：检测自动、修复手动。缺口不在能力，而在编排——`ShotRepairService` 早就写好了，只差一个调用方。
+
+现在的链路是 `generateShotFrames` → `autoCheckConsistency` → `autoRepairDriftedShots`，三道闸按成本从低到高排：
+
+- **开关**：`MIRAFRAME_AUTO_REPAIR`，默认开；预算 `MIRAFRAME_AUTO_REPAIR_MAX_SHOTS` 默认 2，压到 0 就退回「只告警、手动修」。
+- **图像服务是否真能出图**：这一道最容易被忽略。`generateImage` 在 **fake provider 或没配 key** 时会**静默返回占位图**，不拦住就会把一张真图换成灰底占位图、还顺手清掉视频。所以先用 `isImageRepairAvailable()` 解析候选链，要求至少一家「非 fake 且带 key」。
+- **这一轮有没有漂移**：只修 `verdict=drift`。灰区 `review` 不修——判定本身不确定，重画大概率是白花钱；`ok` 和 `unverifiable` 也不动。
+
+预算怎么花：按「漂得最厉害」排序，也就是取该镜头里 `distance` 最大的那个角色，从重到轻取前 N 个。每镜头只出现一次，所以不存在同一张图反复重画。
+
+复检语义是特意设计的：重画后立刻只重检这一张，`ok` / `review` 算「不再漂移」，`unverifiable` **不算修好**——没检出脸等于没有证据，这时候宣称修好只会掩盖问题。修不好的镜头保持原样，前端面板仍可手动重试。
+
+还有两个实现细节值得说：
+
+1. **先出图成功、再写库**。`repairWithReferences` 里图生图返回后才更新 `imageUrl`、清空 `videoUrl`；返回 `data:` 开头（占位图）时在写库前就抛错，原图不受影响。失败的镜头会进回执的 `failed`，不会让整轮中断。
+2. **挂在生视频之前**。校验和修复都在 `generateShotFrames` 末尾，`generateShotVideos` 拿到的就是新图，所以**不需要额外重合成**——这也是为什么「清空 `videoUrl`」在这里不是代价，而是正确性保证。
+
+观测上新增 `consistency_repair_completed` 事件，载荷带 `repaired`（含复检判定与 `resolved`）、`skipped`（`not_drift` / `no_references` / `over_budget`）、`failed`，前端消息流会显示「重画 2 个、1 个已恢复」。
+
+**可能被追问：为什么不干脆全自动、不设上限？** → 一致性判定本身有波动，重画又是按张计费；无上限的自动修复会在一个本来就判不准的指标上反复花钱。预算 + 复检 + 保留手动兜底，是「自动化」和「可预测成本」之间的折中。
+
 ---
+
 
 ## 5. 诚实边界（主动交代比被问出来强）
 
@@ -258,7 +282,7 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 - **长期记忆的边界**：`conversation_memory` 每个项目一行，存的是单段摘要，没有向量检索、不能跨项目复用；摘要质量依赖模型，`keepTurns=5` 之外的细节只剩压缩后的一句。真要做得更细，应该按「角色设定 / 分镜决定 / 风格偏好」分槽存储，而不是一段散文。
 - **provider 选路的边界**：静态优先级 + 熔断，不是按成本/延迟动态加权的负载均衡；熔断状态在进程内，多实例部署时各算各的（应改 Redis 共享）；候选链目前靠 `BASE_URL` 嗅探协议（dashscope / agnes / 通用 OpenAI），新增一家特殊协议仍要改代码。
 - **face-api 局限**：半透明、背影、非人形参考图检不出脸，标 `no_reference`，不误判但也无法校验。
-- **i2i 修正**：手动触发，且会清空该镜视频，需要重新合成才会更新成片。
+- **i2i 自动修复的边界**：只修 `drift` 不修灰区 `review`；单轮预算默认 2 个镜头（`MIRAFRAME_AUTO_REPAIR_MAX_SHOTS`），是「每次跑」而不是「全项目总量」；每个镜头只修一次，避免修脸把构图修坏后再来回震荡；预算和判定都在进程内，多实例部署时各算各的。
 - **成片字幕**：外挂 `final.srt`，没有烧录进画面。
 
 ---
@@ -273,7 +297,7 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 | 增量与续跑 | `packages/server/src/agent/revision.service.ts`、`services/lineage.ts` |
 | Provider 选路与熔断 | `packages/server/src/services/provider-routing.ts`、`modules/config/providers.controller.ts` |
 | Provider 与失败恢复 | `packages/server/src/services/{text,video,image,tts}.service.ts`、`config/app.config.ts` |
-| 一致性闭环 | `packages/server/src/services/{face,consistency,consistency.service,shot-repair}.service.ts`、`agent/agent.processor.ts:753-802` |
+| 一致性闭环 | `packages/server/src/services/{face,consistency,consistency.service,shot-repair,auto-repair}.service.ts`、`agent/agent.processor.ts` 的 `autoCheckConsistency` / `autoRepairDriftedShots` |
 | 前后端契约 | `packages/shared/src/types/*`、`constants/{events,stages,approval}.ts` |
 | 前端工作台 | `packages/frontend/src/pages/ProjectPage.tsx`、`components/project/*`、`hooks/useWebSocket.ts` |
 | 改动时间线 | `MODIFICATIONS.md` |
