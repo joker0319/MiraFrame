@@ -433,3 +433,48 @@ VIDEO_TIMEOUT_MS=300000
 | 端到端闭环 | `mcp-tool-loop.test.ts`（2） | 预设 tool_calls 驱动真实 ToolLoop：模型先调 `list_project_assets` 查 docs，再写草稿落库；**断言第二轮上下文里出现了 `architecture-walkthrough.md`**，证明工具结果真的回填给了模型 |
 
 另外用 `node` 直接加载 `dist/index.js` 验证过构建产物形态：`serverInfo` 正确、工具清单可枚举、能列真实 `docs` 目录 —— 确认「复制脚本进 dist」这一步真的解决了问题。
+
+---
+
+## MCP 连接层升级：自实现 stdio → 官方 `@langchain/mcp-adapters`
+
+**动机**：P1-3 当时因为工作区装不了依赖，MCP 客户端是按规范自写的。装上官方 SDK 后，连接层应该收敛到官方实现上 —— 自研协议栈是学习手段，不是产品形态。但这次不是「推翻重写」，而是**换连接层、保留转换层**，正好验证了当初分层的价值。
+
+**版本选择（关键取舍）**
+
+| 版本 | peer 要求 | 与项目现状（core 1.1.48 / langgraph 1.3.2） |
+| --- | --- | --- |
+| `2.0.3`（最新） | `core ^1.2.6`、`langgraph ^1.4.18` | 两个都不满足，会被迫升 Agent 骨架 |
+| `1.1.4` | `core ^1.0.0`、`langgraph ^1.4.10` | langgraph 不满足 |
+| **`1.0.1`** | `core ^1.0.0`、`langgraph ^1.0.0` | **全部满足，零升级** |
+
+`StateGraph`、`interrupt`、`PostgresSaver`、`Command` 都建在 core/langgraph 上，为一个增强能力去动骨架不值，所以钉死 `1.0.1`（带 `@modelcontextprotocol/sdk@1.32.2`）。
+
+**改动**
+- `tools/mcp/sdk-toolkit.ts`（新）：`MultiServerMCPClient` 连接 → `getTools()` → 转换 → `close()`。只做连接，不碰工具语义；失败时 `close()` 掉半开连接再抛。
+- `tools/mcp/adapter.ts`：新增 `langChainMcpToolToAgentTool()`、`toMcpErrorText()`、`registerAgentTools()`。
+- `tools/mcp/assets-toolkit.ts`：新增 `transport: "sdk" | "builtin" | "auto"`（默认 `auto`：先 SDK，失败回落自实现），返回结果里带 `transport` 字段说明实际用了哪条；重名注册逻辑抽成 `registerAgentTools()` 两条连接层共用。
+- `tools/mcp/index.ts`：导出新入口与类型。
+- `vitest.config.ts` 不变（仍默认 `MIRAFRAME_MCP_ASSETS=0`，MCP 用例显式 `enabled: true`）。
+
+**换 SDK 时撞到的真实语义坑（这是本次最有价值的发现）**
+
+MCP 规范里 `isError: true` 是**工具级错误**：参数不对、路径越界，模型看到它才能改参数重试。但官方 SDK 会把它包成一个抛出的异常：
+
+```
+MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径越界…
+```
+
+如果任由异常冒泡，`ToolLoop` 会在 `registry.execute()` 之外中断（虽然 registry 有兜底 catch，但错误文案会变成两层前缀且丢失语义），工具错误就变成了传输错误，Agent 的自我修正能力随之消失。`toMcpErrorText()` 专门处理这件事：剥掉 SDK 包装前缀、还原成单层 `ERROR:` 文本；测试断言 `content` 里不含 `returned an error`。
+
+**验证**：全仓 **234 个测试全过**（shared 60 / agent 92 / server 72 / frontend 10），`pnpm build`、`pnpm typecheck` 通过。新增 14 个用例（`mcp-sdk.test.ts`）：
+
+| 组 | 断言 |
+| --- | --- |
+| SDK 连接层（6） | 默认走 sdk；工具清单与自实现完全一致；schema 是纯 JSON Schema 可直接转 AgentTool；`serverInfo` 来自 initialize 握手（`miraframe-assets` / `0.1.0`）；registry 调用与本地工具一致；工具级错误被还原成单层 `ERROR:` |
+| 连接层可切换（4） | `builtin` 显式生效；`auto` 优先 sdk；sdk 模式脚本缺失 → null；auto 模式两条都失败 → null |
+| `toMcpErrorText`（4） | 剥前缀；无 `ERROR:` 时补工具名；传输级错误保留工具名；非 Error 抛出物转文本 |
+
+另外用 `node` 直接加载 `dist/index.js` 验证过构建产物形态：`transport: sdk`、`serverInfo` 正确、能列真实 `docs` 目录，且素材库日志里出现 `initialize from @langchain/mcp-adapters` —— 确认走的确实是官方 SDK 而不是兜底路径。
+
+**保留自实现客户端的理由**：两条连接层契约一致、都有测试覆盖，SDK 因版本或环境问题不可用时不至于整个功能消失；`MIRAFRAME_MCP_TRANSPORT=sdk|builtin|auto` 可显式切换。这不是冗余 —— 而是「能力可降级」的同一原则在连接层的延续。

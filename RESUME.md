@@ -65,7 +65,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 3. 落地 4 个 `interrupt` 人工门 + DB 持久化等待位置 + Redis 恢复；`target_stage` 阶段续跑配合血缘分析实现增量重生成。
 4. 治理外部依赖：文本 429 串行队列 + `Retry-After`/指数退避，视频 503/队列满分类重试（8 次、封顶 120s），供应商差异全部收敛到配置层；曾以最小只读探测定位成本问题并改用免费模型。
 5. 构建一致性闭环：face-api wasm 提速约 23×（41s → 1.8s）→ 镜头图生成后自动校验并落库告警 → 参考图 i2i 反哺修正；6 镜头 / 3 角色项目端到端 1.85s。
-6. 完成成片链路与工程化：逐镜头 macOS TTS 对白配音、原声底噪处理与 `final.srt` 字幕，输出约 34s 成片；pnpm monorepo 四包共享 Zod 契约，220 个测试用例、CI 保障 `build` / `typecheck` / 全量测试通过；BullMQ 并发 8 下用 AsyncLocalStorage 隔离每个 job 的 AgentContext，移除全局兜底，缺上下文显式报错而非静默产出空结果。
+6. 完成成片链路与工程化：逐镜头 macOS TTS 对白配音、原声底噪处理与 `final.srt` 字幕，输出约 34s 成片；pnpm monorepo 四包共享 Zod 契约，234 个测试用例、CI 保障 `build` / `typecheck` / 全量测试通过；BullMQ 并发 8 下用 AsyncLocalStorage 隔离每个 job 的 AgentContext，移除全局兜底，缺上下文显式报错而非静默产出空结果。
 
 ---
 
@@ -87,7 +87,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 3. **Human-in-the-Loop 与断点续跑**：4 个 `interrupt` 门 + DB 记录 `awaitingGate` + Redis 恢复 + `target_stage` 从指定阶段切入，已完成素材不重生成。
 4. **面向真实供应商的可靠性治理**：429 串行队列与 `Retry-After`/指数退避、503/队列满分类重试、血缘分析增量标脏、provider 配置化降级。
 5. **可量化的视觉评估闭环**：face-api 128 维 descriptor + 欧氏距离阈值 + 贪心指派处理多角色同框，自动校验后以参考图 i2i 反哺；文本用 LLM 评审、几何特征用专用模型，职责分离。
-6. **可插拔工具层 + MCP**：`ToolRegistry` + `ToolLoop` 让模型自主选工具（原生 function calling，不支持时降级 JSON 协议）；工具定义与 LangChain `tool()` 双向互通；按 MCP 规范（JSON-RPC over stdio）自实现客户端并挂真实素材库 server，本地工具与远端工具在节点侧无差别，拉起失败自动降级不影响主流程。
+6. **可插拔工具层 + MCP**：`ToolRegistry` + `ToolLoop` 让模型自主选工具（原生 function calling，不支持时降级 JSON 协议）；工具定义与 LangChain `tool()` 双向互通；连接层主用官方 `@langchain/mcp-adapters`，并保留按 MCP 规范（JSON-RPC over stdio）自实现的客户端作兜底，两者契约一致可切换；吸收 SDK 把工具级 `isError` 包成异常的行为、还原为回填给模型的错误文本，保住 Agent 自我修正能力。
 
 ---
 
@@ -96,7 +96,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 | 数据 | 口径 / 出处 |
 | --- | --- |
 | 50+ 个提交、4 个包、176 个 TS/TSX 文件 | `git rev-list --count HEAD`；含 25 个测试文件，非测试 151 个 |
-| 220 个测试用例 / 25 个测试文件；后端 72 全过；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个、并发隔离 4 个、工具层与 MCP 30 个；`INTERVIEW_GUIDE.md` §0 |
+| 234 个测试用例 / 26 个测试文件；后端 72 全过；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个、并发隔离 4 个、工具层与 MCP 44 个；`INTERVIEW_GUIDE.md` §0 |
 | 6 个生产阶段、4 个人工门、29 类 WS 事件、16 个 stage 定义 | `shared/src/constants/{events,stages}.ts`、`agent/src/nodes/index.ts` |
 | face-api 9 张图 41s → 1.8s（约 23×） | wasm 后端 + 模型单例缓存，`face.service.ts` |
 | 一致性端到端 1.85s（6 镜头 / 3 角色） | project-23，`GET /consistency?refresh=1` |
@@ -123,7 +123,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 | 独立从零设计并开发 | 与开源二次开发的事实不符，背调必翻车 | 基于开源项目二次改造，主导 Agent 链路重构 |
 | 参与 / 负责 / 协助了后端开发 | 弱动词，看不出你做了什么 | 写明具体动作与结果 |
 | 实现了 AI 漫剧生成系统 | 没有信息量 | 写清「把固定流水线改造成可解释、可恢复的多 Agent 系统」 |
-| 接入 MCP / 自研多 Agent 框架 / 分布式高可用 | 没做过 | 删掉；见 §7 诚实红线 |
+| 自研多 Agent 框架 / 分布式高可用 | 没做过（MCP 已接入，可以写，但要写清「官方 SDK + 自实现兜底」） | 删掉；见 §7 诚实红线 |
 | 大幅提升性能、显著优化体验 | 无数字 | 41s → 1.8s、距离 0.4 → 0.22 |
 | LangGraph / NestJS / PostgreSQL / Redis / Zod / WebSocket…（纯罗列） | 技术栈栏已经写过了 | 每条 bullet 只保留「解决问题所需」的技术词 |
 | 上线后稳定运行 / 服务 N 万用户 | 原型项目，无生产流量 | 本地演示环境端到端跑通 |
@@ -167,7 +167,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 ## 7. 诚实红线（写了就是给自己挖坑）
 
 - **没做的**：独立意图分类器、图像/视频多模态 Critic、provider 智能选路、字幕烧录。（checkpoint 持久化已在 P1-1 补齐，MCP 已在 P1-3 接入，CI 已在 P0 补齐。）
-- **半成品**：工具层目前只有大纲节点接入（MCP 工具也挂在那里），其余阶段仍是硬编码 `AgentContext` 方法；MCP 客户端是自实现而非官方 SDK，只挂了素材库一个 server；`messages` 仍拼接式注入，没有滚动摘要。
+- **半成品**：工具层目前只有大纲节点接入（MCP 工具也挂在那里），其余阶段仍是硬编码 `AgentContext` 方法；MCP 只挂了素材库一个 server；`messages` 仍拼接式注入，没有滚动摘要。
 - **配置口径**：Critic 阈值统一为 `CRITIC_SCORE_THRESHOLD=6.0`（由 `agents/critic.ts` 读取），不再有 `CRITIQUE_*` 双前缀；启动期会校验数值合法性并告警。
 - **原型局限**：免费模型 + 本地 PostgreSQL/Redis；face-api 对半透明、背影、非人形参考图检不出脸；i2i 修正手动触发且会清空该镜视频。
 - **成本教训**：早期一次探测误用付费模型产生约 ¥17–27 费用，之后把 provider 全量配置化并定下「探测只读、最小单任务」规则 —— 这段适合口述，不适合写进简历。

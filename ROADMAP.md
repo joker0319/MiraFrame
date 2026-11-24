@@ -119,10 +119,10 @@
 
 ### P1-3 工具层统一 + 接 MCP
 
-> **状态：已完成（2026-11-24）**。工具协议与 LangChain `tool()` 双向互通（`tools/langchain-bridge.ts`），MCP 按规范自实现 stdio 客户端（`tools/mcp/client.ts`，零新依赖），配套一个真实素材库 server（`tools/mcp/servers/assets-server.mjs`，暴露项目内真实文件、带路径穿越与敏感文件拦截）。大纲节点已把 MCP 工具注册进同一个 ToolRegistry，模型可自主调用；`ToolLoop × MCP` 集成测试用预设 tool_calls 验证了「模型决策 → 远端工具执行 → 结果回填 → 继续生成」的完整链路（含对真实目录内容的断言）。见 §MODIFICATIONS P1-3 一节。
+> **状态：已完成（2026-11-24，2026-11-25 升级连接层）**。工具协议与 LangChain `tool()` 双向互通（`tools/langchain-bridge.ts`）；MCP 先按规范自实现 stdio 客户端（`tools/mcp/client.ts`，零依赖），随后接入官方 `@langchain/mcp-adapters@1.0.1` 的 `MultiServerMCPClient`（`tools/mcp/sdk-toolkit.ts`）作为默认连接层，自实现保留为 `transport: builtin` 兜底、`auto` 自动回落。配套真实素材库 server（`tools/mcp/servers/assets-server.mjs`，暴露项目内真实文件、带路径穿越与敏感文件拦截）。大纲节点把 MCP 工具注册进同一个 ToolRegistry，模型可自主调用；`ToolLoop × MCP` 集成测试用预设 tool_calls 验证了「模型决策 → 远端工具执行 → 结果回填 → 继续生成」的完整链路（含对真实目录内容的断言）。换层时发现官方 SDK 会把工具级 `isError` 包成异常、破坏「错误回填给模型」的契约，适配层已还原。见 §MODIFICATIONS P1-3 一节。
 
 - **动机**：工具层已有但只覆盖大纲节点（`tools/registry.ts`、`loop.ts`、`outline-tools.ts`），且是自研 JSON Schema 协议；`base.ts:22-47` 的硬编码 `AgentContext` 仍在。MCP 是热词，也是六大考点里最明确的一条短板。
-- **动作**：把 `ToolRegistry` 对齐 LangChain `tool()` 协议，把 `saveOutline` 等硬编码方法迁成注册工具；接 `@langchain/mcp-adapters` 挂一个真实外部 server（如文件系统或素材库），`registry.ts:9-10` 的注释就能兑现。
+- **动作**：把 `ToolRegistry` 对齐 LangChain `tool()` 协议，把 `saveOutline` 等硬编码方法迁成注册工具；接 `@langchain/mcp-adapters` 挂一个真实外部 server（如文件系统或素材库），`registry.ts:9-10` 的注释就能兑现。**注**：`2.x` 要求 core ^1.2.6 / langgraph ^1.4.18，与本项目 1.1.48 / 1.3.2 冲突，故钉死 `1.0.1`（peer `^1.0.0`）。
 - **验收**：至少一个 Agent 通过 MCP 工具完成一次真实调用；工具清单可枚举。
 - **落地点**：`agent/src/tools/*`、`agents/base.ts`、`package.json`。
 - **提醒**：别为凑热词挂一堆没用的 server，一个真实调用胜过五个空壳。

@@ -22,7 +22,7 @@
 
 ### 结果数据（可引用）
 
-- 后端最近一次验证 **72 个测试全过**，全仓 `pnpm build` / `pnpm typecheck` 通过；源码中 **220 个测试用例**分布在四个包（含 P0 加固 18 个、并发上下文隔离 4 个、工具层与 MCP 30 个）。
+- 后端最近一次验证 **72 个测试全过**，全仓 `pnpm build` / `pnpm typecheck` 通过；源码中 **234 个测试用例**分布在四个包（含 P0 加固 18 个、并发上下文隔离 4 个、工具层与 MCP 44 个）。
 - 项目共 **42 个提交**（含文档提交）；一致性相关三次提交 `dfbfcb0 → c5fc8f7 → 7037473` 对应「检测 → 自动接入流水线 → 反哺修正」三步演进。
 - 真实运行：project-23 **6 镜头 / 3 角色**，一致性端到端 **1.85 秒**；续跑 run 51 结果 `ok=2 review=4 drift=0`。
 - i2i 反哺对照：沈鸢人脸距离从灰区约 **0.4 → 0.22**；临时项目端到端实测 **0.2562，判定 ok**。
@@ -144,7 +144,7 @@
 | 考点 | MiraFrame 里对应什么 | 能讲到什么深度 | 要主动说的边界 |
 | --- | --- | --- | --- |
 | 意图识别 | Director 把题材 + 用户反馈转成 `executionPlan`（`director.ts:99-137`） | 任务意图 → 受约束的执行计划，带 `planRationale` 可解释 | 没有独立的「用户意图分类器」，是规划而非分类 |
-| 工具调用 | `ToolRegistry` + `ToolLoop` 模型自主选工具；`tools/langchain-bridge.ts` 与 LangChain `tool()` 双向互通；`tools/mcp/` 按 MCP 规范自实现 stdio 客户端，挂真实素材库 server | 能讲清「工具描述 → 模型决策 → 执行 → 结果回填」闭环，以及本地工具与远端 MCP 工具如何统一 | MCP 客户端是自实现而非官方 SDK；目前只有大纲节点挂了远端工具 |
+| 工具调用 | `ToolRegistry` + `ToolLoop` 模型自主选工具；`tools/langchain-bridge.ts` 与 LangChain `tool()` 双向互通；`tools/mcp/` 主用官方 `@langchain/mcp-adapters`（1.0.1），并保留按 MCP 规范自实现的 stdio 客户端作兜底，两条连接层契约一致、可切换 | 能讲清「工具描述 → 模型决策 → 执行 → 结果回填」闭环，以及本地工具、远端 MCP 工具、官方 SDK 与自实现如何统一 | 目前只有大纲节点挂了远端工具；MCP 是可选增强 |
 | 多轮记忆 | `messages` 表 + Critic 的 `feedback` 跨轮回灌（`plan.ts:71-81`） | 反馈能改变下一轮生成，不是单轮问答 | 图 checkpoint 已落 PostgreSQL；`messages` 仍是拼接式上下文，不做滚动摘要 |
 | 多 Agent 路由 | Director 规划 + Review 的 `FALLBACK_ROUTE`（`review.ts:9-14,80-82`） | 模型决定路由，失败有白名单兜底 | 节点是类，不是独立进程/服务 |
 | Monitor 闭环 | 29 类 WS 事件（`packages/shared/src/constants/events.ts`）+ `run_*` 事件 + `critique_result` 评分实时下发 + 评分写 state | 进度、门、产物、告警、评分前端实时可见 | 事件是进程内广播，没有做多实例的 Redis adapter |
@@ -181,7 +181,7 @@
 全栈 TS：前端纸墨设计系统（语义 token + reduced-motion + 双主题）、工作台与一致性面板；后端 NestJS 服务（TTS 混流、face-api 初始化、i2i 反哺）；Agent 层的状态契约和 WS 事件类型也参与对齐。分工上重点在「把工程化保障做实」。
 
 **Q9：和你的 EchoMind 项目是什么关系？**
-EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 Agent 工程能力迁移到内容生成场景：LLM-as-Judge、多 Agent 路由、Monitor 闭环是共通的；MCP 在 MiraFrame 里用真实素材库 server 落了地（自实现 stdio 客户端，零新增依赖），多轮记忆仍是拼接式上下文，是明确的下一步。
+EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 Agent 工程能力迁移到内容生成场景：LLM-as-Judge、多 Agent 路由、Monitor 闭环是共通的；MCP 在 MiraFrame 里用真实素材库 server 落了地，连接层主用官方 `@langchain/mcp-adapters`，多轮记忆仍是拼接式上下文，是明确的下一步。
 
 **Q10：最大的技术债是什么？**
 `critique_result` 事件**已补齐**（P1-2：Critic 每轮评审后经 WS 下发评分、阈值、轮次与打回原因，前端节点详情渲染评分卡片）；`_nodeCtx` 全局兜底**已删除**（P1-4：节点上下文只走 ALS，取不到直接报错）。剩余技术债是字幕外挂 SRT 没烧进画面、i2i 修正目前是手动触发、`messages` 仍是拼接式上下文没有滚动摘要、WS 是进程内广播没接 Redis adapter。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
@@ -189,17 +189,25 @@ EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 
 **Q11：BullMQ 并发 8，怎么保证项目之间不串号？**
 上下文不走模块级全局变量，只走 `AsyncLocalStorage`：processor 用 `runWithNodeContext(ctx, () => compiled.invoke(...))` 把每个 job 的 ctx 绑定在自己的异步链上，节点里 `getNodeCtx()` 只从 ALS 取。早先这里有个 `_nodeCtx` 全局兜底 + 取不到就返回 mock（`callLlm` 吐 `"{}"`），并发下会串号、且静默产出空结果还显示成功——现在取不到直接抛 `[agent:ctx] 图节点拿不到 AgentContext`。模块级共享的只有两类东西：Agent 实例（只持有 `readonly name`，无状态）和 checkpointer 单例（内部是 pg 连接池，本来就该复用，不持有项目上下文）。测试用 8 个不同 `projectId` 并发跑 Critic 节点、故意错开 LLM 延迟，断言每份回报的 issues/suggestions 都来自它自己的 job。
 
-**Q12：MCP 你是怎么接的？为什么不用官方 SDK？**
+**Q12：MCP 你是怎么接的？自实现和官方 SDK 怎么选？**
 
-MCP 的 stdio 传输本身很小：stdin/stdout 每行一个 JSON-RPC 2.0 消息，握手是 `initialize` → 收 result → 发 `notifications/initialized`，然后 `tools/list` 拿清单、`tools/call` 执行，结果在 `result.content[]` 里。我把它实现成一个 200 行的客户端（`tools/mcp/client.ts`）：请求 id 递增配对、超时、子进程退出时把所有 pending 拒绝掉、stdout 混入非协议内容时记进诊断而不是崩掉。
+先自实现、后换官方 SDK，两步都留下了。顺序很重要，因为它逼我先把协议搞明白：
 
-不引官方 SDK 的理由有三条：项目已有 `ToolRegistry`，只差「远端描述符 → `AgentTool`」这一层薄适配；协议面小，自己实现能把超时/降级语义控制成我要的样子；少一个重依赖，冷启动和排查都更简单。
+第一步按规范写了 200 行 stdio 客户端（`tools/mcp/client.ts`）：stdin/stdout 每行一个 JSON-RPC 2.0 消息，握手 `initialize` → 收 result → 发 `notifications/initialized`，然后 `tools/list` / `tools/call`，结果在 `result.content[]`。细节上做了请求 id 递增配对、超时、子进程退出时把所有 pending 拒绝掉、stdout 混入非协议内容时记进诊断而不是崩。
 
-配套的 server 是真实可跑的（`servers/assets-server.mjs`，零依赖），暴露项目内的文件系统，做了路径穿越校验和敏感文件拦截。验收方式是集成测试真的 spawn 子进程走完整往返：`initialize` → `tools/list` → `tools/call` 读到真实目录内容 → 越界路径被拒。
+第二步换成官方 `@langchain/mcp-adapters` 的 `MultiServerMCPClient`：连上 → `getTools()` → 转换 → 关掉。换完之后 **节点代码和 ToolLoop 一行没改**，因为当初就把「连接层」和「转换层」拆开了：`sdk-toolkit.ts` 和自实现都只产出 `AgentTool[]`，差异被 `adapter.ts` 吃掉。这是分层带来的直接收益。
+
+自实现的客户端没有删，保留为 `transport: "builtin"`，默认 `auto`（先 SDK，失败回落），可用 `MIRAFRAME_MCP_TRANSPORT` 切换。理由是两条路契约一致、都有测试，SDK 出问题时不至于整个功能不可用。
+
+**换 SDK 时踩到一个真实的语义坑**，这个值得讲：MCP 规范里 `isError: true` 是**工具级错误**（参数不对、路径越界），模型看到它才能自我修正；但官方 SDK 会把它包成抛出的异常（`MCP tool 'x' on server 'y' returned an error: ...`）。如果任由异常冒泡，ToolLoop 会中断而不是回填给模型——工具错误就变成了传输错误，Agent 的自我修正能力随之消失。所以 `adapter.ts` 里专门有 `toMcpErrorText()`：剥掉 SDK 的包装前缀、还原成单层 `ERROR:` 文本，并在测试里断言「不含 `returned an error`」。这类「库的默认行为违反你的契约」的问题，只有集成测试能抓住。
+
+**版本也是坑**：`@langchain/mcp-adapters@2.x` 要求 `@langchain/core ^1.2.6` + `langgraph ^1.4.18`，而项目锁在 core 1.1.48 / langgraph 1.3.2，`StateGraph`、`interrupt`、`PostgresSaver` 全建在这两层上。所以钉死 `1.0.1`——它的 peer 是 `^1.0.0`，零升级。为一个增强能力去动 Agent 骨架不值。
+
+配套的 server 是真实可跑的（`servers/assets-server.mjs`，零依赖），暴露项目内文件系统，做了路径穿越校验和 `.env`/密钥类文件拦截。验收方式是集成测试真的 spawn 子进程走完整往返。
 
 最强的一条证据是 `mcp-tool-loop.test.ts`：模型（预设 tool_calls）先调 `list_project_assets` 查 docs 目录，结果回填进下一轮上下文，再调本地工具写草稿、落库。断言里直接检查了「模型第二轮的上下文里出现了 `architecture-walkthrough.md`」——证明工具结果真的回到了模型，而不是调完就丢。
 
-工程细节上还有两点值得说：一是 MCP 是**可选增强**，`createAssetsToolKit()` 拉不起进程就返回 null，节点照常跑；二是构建时有个坑——tsup 是 bundle 模式，`.mjs` 子进程脚本不会进 dist，而生产镜像是「只拷 dist」的，所以加了一个 `scripts/copy-mcp-servers.mjs` 把它复制进去，否则 `node dist` 形态下 MCP 永远降级。
+工程细节上还有两点：一是 MCP 是**可选增强**，`createAssetsToolKit()` 拉不起进程就返回 null，节点照常跑；二是构建坑——tsup 是 bundle 模式，`.mjs` 子进程脚本不会进 dist，而生产镜像「只拷 dist」，所以加了 `scripts/copy-mcp-servers.mjs`，否则 `node dist` 形态下 MCP 永远降级。
 
 ---
 
@@ -207,7 +215,7 @@ MCP 的 stdio 传输本身很小：stdin/stdout 每行一个 JSON-RPC 2.0 消息
 
 - **checkpoint（P1-1 已修）**：`packages/agent/src/checkpointer.ts` 的 `createCheckpointer(connectionString)` 返回 `PostgresSaver` 并幂等建表，`agent.processor.ts` 用 `app.databaseUrl` 构造；无连接串时才退回 `MemorySaver`（单测路径）。
 - **`critique_result` 事件（P1-2 已修）**：`AgentContext.reportCritique` 由 `CriticAgent` 每轮评审后调用，`agent.processor.ts` 转成 snake_case 载荷经 WS 下发；前端 `critiqueStore` 收下后渲染评分卡片（总分/阈值/轮次/维度/问题/建议），消息流也留一条文本便于回溯。
-- **MCP（P1-3 已接）**：`tools/mcp/client.ts` 按 MCP 规范（JSON-RPC 2.0 over stdio）自实现客户端，`servers/assets-server.mjs` 是配套的真实素材库 server，暴露项目内真实文件并拦截路径穿越与 `.env`/密钥类文件。**不用官方 `@langchain/mcp-adapters`** 是刻意取舍：只需要「远端工具 → AgentTool」这层薄适配，协议面本身很小，少一个重依赖。目前只有大纲节点挂了远端工具，且 MCP 是可选增强——拉起失败自动降级，主流程不受影响。
+- **MCP（P1-3 已接，连接层已换官方 SDK）**：默认走 `@langchain/mcp-adapters@1.0.1` 的 `MultiServerMCPClient`，`tools/mcp/client.ts`（自实现 JSON-RPC over stdio）保留为 `transport: builtin` 兜底，`MIRAFRAME_MCP_TRANSPORT` 可切。`servers/assets-server.mjs` 是配套的真实素材库 server，拦截路径穿越与 `.env`/密钥类文件。钉 1.0.1 是因为 2.x 要求把 core 升到 ^1.2.6、langgraph 升到 ^1.4.18，为增强能力动 Agent 骨架不划算。仍只有大纲节点挂了远端工具，且 MCP 是可选增强——拉起失败自动降级，主流程不受影响。
 - **`CRITIC_SYSTEM_PROMPT`**（图像四维 rubric）定义了但 CriticAgent 没调用，当前只审分镜文本。
 - **残留（P0 已清理）**：`DOUBAO_*` 配置与 `app.config.ts` 里的兜底字段、`UniversesPage.tsx` / `UniverseDetailPage.tsx` / `universesApi.ts` 均已删除；宇宙路由保留重定向以免旧链接 404。`config/` 接口已加 `ADMIN_TOKEN` 守卫，CORS 收紧为白名单，明文 `reveal` 接口移除。
 - **face-api 局限**：半透明、背影、非人形参考图检不出脸，标 `no_reference`，不误判但也无法校验。
