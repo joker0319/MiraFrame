@@ -62,6 +62,8 @@ MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简�
 | 生成服务配置            | 文本、图像、视频服务可在设置面板中配置和测试                               |
 | 全栈工程结构            | pnpm workspace 管理 frontend / server / agent / shared |
 
+> 准备面试/汇报时，直接看 [INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md)：三档讲法、五个带代码位置的 STAR 案例、六大 Agent 考点映射，以及需要主动交代的边界。
+
 ---
 
 ## 核心功能
