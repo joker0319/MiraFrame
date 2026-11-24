@@ -1,6 +1,17 @@
 import { Injectable, Inject } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { LlmChatMessage, LlmChatResponse, ToolDefinition, ToolCall } from "@miraframe/agent";
+import {
+  ProviderHttpError,
+  ProviderRouter,
+  chainFingerprint,
+  classifyProviderFailure,
+  readRouterOptions,
+  resolveProviderChain,
+  type ProviderCandidate,
+  type ProviderEnvReader,
+  type ProviderHealthSnapshot,
+} from "./provider-routing";
 
 @Injectable()
 export class TextService {
@@ -8,46 +19,150 @@ export class TextService {
   // 从源头避免"并发超限"型 429；重试只需处理偶发的 RPM 频率限制。
   private static requestQueue: Promise<unknown> = Promise.resolve();
 
+  /** 选路器持有熔断状态，必须跨请求复用；链被运行时改写时原地同步而不重建。 */
+  private router: ProviderRouter | null = null;
+  private routerFingerprint = "";
+
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
+
+  private envReader(): ProviderEnvReader {
+    // 保留改造前的兜底顺序：TEXT_* → ANTHROPIC_*（历史上只配过这一组）→ app.* 默认值。
+    // 否则 `.env` 里只写 ANTHROPIC_AUTH_TOKEN 的环境会在选路时被判定为「没有 key」。
+    const anthropicFallbacks: Record<string, string> = {
+      TEXT_BASE_URL: "ANTHROPIC_BASE_URL",
+      TEXT_API_KEY: "ANTHROPIC_AUTH_TOKEN",
+      TEXT_MODEL: "ANTHROPIC_MODEL",
+    };
+    const appFallbacks: Record<string, string> = {
+      TEXT_PROVIDER: "app.textProvider",
+      TEXT_BASE_URL: "app.textBaseUrl",
+      TEXT_API_KEY: "app.textApiKey",
+      TEXT_MODEL: "app.textModel",
+      TEXT_ENDPOINT: "app.textEndpoint",
+    };
+    return (key: string) => {
+      const direct = this.config.get<string>(key);
+      if (typeof direct === "string" && direct.trim()) return direct;
+      const anthropicKey = anthropicFallbacks[key];
+      if (anthropicKey) {
+        const value = this.config.get<string>(anthropicKey);
+        if (typeof value === "string" && value.trim()) return value;
+      }
+      const appKey = appFallbacks[key];
+      if (appKey) {
+        const value = this.config.get<string>(appKey);
+        if (typeof value === "string" && value.trim()) return value;
+      }
+      return undefined;
+    };
+  }
+
+  private getRouter(): ProviderRouter {
+    const get = this.envReader();
+    const chain = resolveProviderChain("text", get);
+    const fingerprint = chainFingerprint(chain);
+    if (!this.router) {
+      this.router = new ProviderRouter("text", chain, readRouterOptions("text", get));
+      this.logChain(chain);
+    } else if (fingerprint !== this.routerFingerprint) {
+      this.router.syncChain(chain);
+      this.logChain(chain);
+    }
+    this.routerFingerprint = fingerprint;
+    return this.router;
+  }
+
+  private logChain(chain: ProviderCandidate[]): void {
+    const names = chain
+      .map((item) => `${item.name}${item.provider === "fake" ? "(fake)" : ""}${item.apiKey || item.provider === "fake" ? "" : "(no-key)"}`)
+      .join(" → ");
+    console.log(`[TextService] provider 链：${names}`);
+  }
+
+  /** 只读健康快照，供 /api/v1/providers 观测。 */
+  providerHealth(): ProviderHealthSnapshot[] {
+    return this.getRouter().snapshot();
+  }
 
   async generate(
     prompt: string,
     options?: { maxTokens?: number; temperature?: number; systemPrompt?: string; intent?: string },
   ): Promise<string> {
-    const provider = this.config.get<string>("app.textProvider") || "anthropic";
-    const baseUrl =
-      this.config.get<string>("app.textBaseUrl") ||
-      this.config.get<string>("ANTHROPIC_BASE_URL") ||
-      "https://dashscope.aliyuncs.com/compatible-mode/v1";
-    const apiKey =
-      this.config.get<string>("app.textApiKey") ||
-      this.config.get<string>("ANTHROPIC_AUTH_TOKEN") ||
-      "";
-    const model =
-      this.config.get<string>("app.textModel") ||
-      this.config.get<string>("ANTHROPIC_MODEL") ||
-      "qwen3.6-plus";
-    const endpoint =
-      this.config.get<string>("app.textEndpoint") ||
-      this.config.get<string>("TEXT_ENDPOINT") ||
-      "/chat/completions";
-    const forceTemperature = this.config.get<number>("app.textForceTemperature");
-    const timeoutMs = this.config.get<number>("app.textTimeoutMs") || 300_000;
+    const router = this.getRouter();
+    const plan = router.attemptOrder();
 
-    console.log(`[TextService] provider=${provider} model=${model}`);
-    console.log(`[TextService] url=${baseUrl}${endpoint}`);
-
-    if (provider === "fake") {
-      return this.generateFakeResponse(prompt, options?.intent);
-    }
-
-    if (!apiKey) {
-      console.warn("[TextService] No API key configured — returning placeholder");
+    // 链里没有任何「配了 key 的非 fake 候选」：沿用改造前的占位行为，
+    // 让未配置密钥的本地环境和 fake 演示不受影响。
+    if (plan.length === 0) {
+      console.warn("[TextService] 没有可用的 provider（未配置 API key）— 返回占位文本");
       return `[LLM not configured] API key not set. Prompt was: ${prompt.substring(0, 100)}...`;
     }
 
+    const failures: Array<{ name: string; message: string }> = [];
+    for (let index = 0; index < plan.length; index += 1) {
+      const { candidate } = plan[index];
+
+      if (candidate.provider === "fake") {
+        this.announceFallback(plan, index);
+        router.recordSuccess(candidate.name, 0);
+        return this.generateFakeResponse(prompt, options?.intent);
+      }
+
+      const startedAt = Date.now();
+      try {
+        const text = await this.attemptGenerate(candidate, prompt, options);
+        router.recordSuccess(candidate.name, Date.now() - startedAt);
+        this.announceFallback(plan, index);
+        return text;
+      } catch (error) {
+        const failure = classifyProviderFailure(error);
+        const message = error instanceof Error ? error.message : String(error);
+        // 请求本身有问题（400/422 等）：换 provider 只会再错一次，还会污染健康度
+        if (!failure.switchable) {
+          console.error(
+            `[TextService] ${candidate.name} 拒绝请求（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），不切换：${message}`,
+          );
+          throw error;
+        }
+        router.recordFailure(candidate.name, error);
+        failures.push({ name: candidate.name, message: message.slice(0, 200) });
+        const next = plan[index + 1];
+        if (next) {
+          console.warn(
+            `[TextService] ${candidate.name} 失败（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），` +
+              `切换到 ${next.candidate.name}：${message.slice(0, 120)}`,
+          );
+        }
+      }
+    }
+
+    throw new Error(
+      `所有文本 provider 均失败（${failures.map((item) => `${item.name}: ${item.message}`).join("；")}）`,
+    );
+  }
+
+  /** 非首选候选成功时补一条降级日志，日志里能直接复盘「哪家挂了、切到了谁」。 */
+  private announceFallback(plan: Array<{ candidate: ProviderCandidate }>, index: number): void {
+    if (index === 0) return;
+    console.warn(
+      `[TextService] 已降级到 ${plan[index].candidate.name}（前序 ` +
+        `${plan.slice(0, index).map((item) => item.candidate.name).join("、")} 未成功）`,
+    );
+  }
+
+  private async attemptGenerate(
+    candidate: ProviderCandidate,
+    prompt: string,
+    options?: { maxTokens?: number; temperature?: number; systemPrompt?: string; intent?: string },
+  ): Promise<string> {
+    const forceTemperature = this.config.get<number>("app.textForceTemperature");
+    const timeoutMs = this.config.get<number>("app.textTimeoutMs") || 300_000;
+
+    console.log(`[TextService] provider=${candidate.name}(${candidate.provider}) model=${candidate.model}`);
+    console.log(`[TextService] url=${candidate.baseUrl}${candidate.endpoint}`);
+
     const body = {
-      model,
+      model: candidate.model,
       messages: [
         {
           role: "system",
@@ -63,14 +178,14 @@ export class TextService {
     const reasoningEffort = this.config.get<string>("app.textReasoningEffort");
     if (reasoningEffort) body.reasoning_effort = reasoningEffort;
 
-    console.log(`[TextService] → POST ${baseUrl}${endpoint}`);
+    console.log(`[TextService] → POST ${candidate.baseUrl}${candidate.endpoint}`);
 
     try {
-      const response = await this.fetchWithRetry(`${baseUrl}${endpoint}`, {
+      const response = await this.fetchWithRetry(`${candidate.baseUrl}${candidate.endpoint}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${candidate.apiKey}`,
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
@@ -81,7 +196,8 @@ export class TextService {
       if (!response.ok) {
         const errorText = await response.text().catch(() => "Unknown error");
         console.error(`[TextService] LLM API error ${response.status}: ${errorText}`);
-        throw new Error(`LLM API error ${response.status}: ${errorText.substring(0, 200)}`);
+        // 抛带状态码的错误：选路层据此决定是否切换/熔断，不靠正则猜
+        throw new ProviderHttpError(response.status, errorText);
       }
 
       const json = (await response.json()) as Record<string, unknown>;
@@ -105,11 +221,10 @@ export class TextService {
       console.warn(`[TextService] Unexpected response format:`, JSON.stringify(json).substring(0, 300));
       return JSON.stringify(json);
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith("LLM API error")) {
-        throw error;
-      }
+      if (error instanceof ProviderHttpError) throw error;
       console.error(`[TextService] Network/fetch error:`, error);
-      throw new Error(`LLM call failed: ${String(error)}`);
+      // 保留 cause，让分类器能识别超时/网络根因
+      throw new Error(`LLM call failed: ${String(error)}`, { cause: error });
     }
   }
 
@@ -125,33 +240,69 @@ export class TextService {
     tools: ToolDefinition[],
     options?: { maxTokens?: number; temperature?: number; intent?: string },
   ): Promise<LlmChatResponse> {
-    const provider = this.config.get<string>("app.textProvider") || "anthropic";
-    if (provider === "fake") return this.fakeToolLoop(messages, tools);
+    const router = this.getRouter();
+    const plan = router.attemptOrder();
 
-    const baseUrl =
-      this.config.get<string>("app.textBaseUrl") ||
-      this.config.get<string>("ANTHROPIC_BASE_URL") ||
-      "https://dashscope.aliyuncs.com/compatible-mode/v1";
-    const apiKey =
-      this.config.get<string>("app.textApiKey") ||
-      this.config.get<string>("ANTHROPIC_AUTH_TOKEN") ||
-      "";
-    const model =
-      this.config.get<string>("app.textModel") ||
-      this.config.get<string>("ANTHROPIC_MODEL") ||
-      "qwen3.6-plus";
-    const endpoint =
-      this.config.get<string>("app.textEndpoint") ||
-      this.config.get<string>("TEXT_ENDPOINT") ||
-      "/chat/completions";
-    const timeoutMs = this.config.get<number>("app.textTimeoutMs") || 300_000;
-
-    if (!apiKey) {
+    // 与改造前一致：无密钥时抛特定错误，ToolLoop 会降级到 JSON 协议
+    if (plan.length === 0) {
       throw new Error("TOOLS_UNSUPPORTED: API key not configured");
     }
 
+    const failures: Array<{ name: string; message: string; toolsIssue: boolean }> = [];
+    for (let index = 0; index < plan.length; index += 1) {
+      const { candidate } = plan[index];
+
+      if (candidate.provider === "fake") {
+        this.announceFallback(plan, index);
+        router.recordSuccess(candidate.name, 0);
+        return this.fakeToolLoop(messages, tools);
+      }
+
+      const startedAt = Date.now();
+      try {
+        const response = await this.attemptWithTools(candidate, messages, tools, options);
+        router.recordSuccess(candidate.name, Date.now() - startedAt);
+        this.announceFallback(plan, index);
+        return response;
+      } catch (error) {
+        const failure = classifyProviderFailure(error);
+        const message = error instanceof Error ? error.message : String(error);
+        const toolsIssue =
+          error instanceof ProviderHttpError && error.switchableOverride === true && failure.kind === "client";
+
+        if (!failure.switchable) {
+          console.error(`[TextService] ${candidate.name} 拒绝 tools 请求（${failure.kind}），不切换：${message}`);
+          throw error;
+        }
+
+        router.recordFailure(candidate.name, error);
+        failures.push({ name: candidate.name, message: message.slice(0, 200), toolsIssue });
+        const next = plan[index + 1];
+        if (next) {
+          console.warn(
+            `[TextService] tools 通道 ${candidate.name} 失败（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），` +
+              `切换到 ${next.candidate.name}：${message.slice(0, 120)}`,
+          );
+        }
+      }
+    }
+
+    const prefix = failures.length > 0 && failures.every((item) => item.toolsIssue) ? "TOOLS_UNSUPPORTED: " : "";
+    throw new Error(
+      `${prefix}所有文本 provider 均失败（${failures.map((item) => `${item.name}: ${item.message}`).join("；")}）`,
+    );
+  }
+
+  private async attemptWithTools(
+    candidate: ProviderCandidate,
+    messages: LlmChatMessage[],
+    tools: ToolDefinition[],
+    options?: { maxTokens?: number; temperature?: number; intent?: string },
+  ): Promise<LlmChatResponse> {
+    const timeoutMs = this.config.get<number>("app.textTimeoutMs") || 300_000;
+
     const body = {
-      model,
+      model: candidate.model,
       messages: messages.map(toWireMessage),
       tools: tools.map((tool) => ({
         type: "function",
@@ -168,13 +319,15 @@ export class TextService {
     const reasoningEffort = this.config.get<string>("app.textReasoningEffort");
     if (reasoningEffort) body.reasoning_effort = reasoningEffort;
 
-    console.log(`[TextService] tools → POST ${baseUrl}${endpoint} | tools=${tools.map((t) => t.name).join(",")}`);
+    console.log(
+      `[TextService] tools(${candidate.name}) → POST ${candidate.baseUrl}${candidate.endpoint} | tools=${tools.map((t) => t.name).join(",")}`,
+    );
 
-    const response = await this.fetchWithRetry(`${baseUrl}${endpoint}`, {
+    const response = await this.fetchWithRetry(`${candidate.baseUrl}${candidate.endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${candidate.apiKey}`,
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
@@ -182,13 +335,19 @@ export class TextService {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error");
-      console.error(`[TextService] tool-calls error ${response.status}: ${errorText}`);
-      // 429 重试耗尽：不要误判成"不支持 tools"去降级 JSON——那只会再撞一次限流
+      console.error(`[TextService] tool-calls error ${response.status} (${candidate.name}): ${errorText}`);
       if (response.status === 429) {
-        throw new Error(`LLM API error 429 (rate limit, retries exhausted): ${errorText.substring(0, 200)}`);
+        // 限流按 rate_limit 处理（切下一家），不要被当成「不支持 tools」
+        throw new ProviderHttpError(429, errorText, {
+          message: `LLM API error 429 (rate limit, retries exhausted): ${errorText.substring(0, 200)}`,
+        });
       }
-      // 上游不支持 tools 时抛特定错误，ToolLoop 会降级到 JSON 协议重试
-      throw new Error(`TOOLS_UNSUPPORTED: LLM API error ${response.status}: ${errorText.substring(0, 200)}`);
+      // 其它 4xx/5xx 在工具通道上很可能是「这家不支持 function calling」，
+      // 换一家有实际意义，所以显式标为可切换；全部失败时上层回 TOOLS_UNSUPPORTED 让 ToolLoop 走 JSON。
+      throw new ProviderHttpError(response.status, errorText, {
+        switchableOverride: true,
+        message: `LLM API error ${response.status}: ${errorText.substring(0, 200)}`,
+      });
     }
 
     const json = (await response.json()) as Record<string, unknown>;

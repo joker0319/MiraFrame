@@ -1,31 +1,132 @@
 import { Injectable, Inject } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import {
+  ProviderHttpError,
+  ProviderRouter,
+  chainFingerprint,
+  classifyProviderFailure,
+  readRouterOptions,
+  resolveProviderChain,
+  type ProviderCandidate,
+  type ProviderEnvReader,
+  type ProviderHealthSnapshot,
+} from "./provider-routing";
 
 @Injectable()
 export class ImageService {
+  /** 熔断状态要跨请求累计，链被改写时原地同步。 */
+  private router: ProviderRouter | null = null;
+  private routerFingerprint = "";
+
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
+
+  private envReader(): ProviderEnvReader {
+    const appFallbacks: Record<string, string> = {
+      IMAGE_PROVIDER: "app.imageProvider",
+      IMAGE_BASE_URL: "app.imageBaseUrl",
+      IMAGE_API_KEY: "app.imageApiKey",
+      IMAGE_MODEL: "app.imageModel",
+      IMAGE_ENDPOINT: "app.imageEndpoint",
+    };
+    return (key: string) => {
+      const direct = this.config.get<string>(key);
+      if (typeof direct === "string" && direct.trim()) return direct;
+      const appKey = appFallbacks[key];
+      if (appKey) {
+        const value = this.config.get<string>(appKey);
+        if (typeof value === "string" && value.trim()) return value;
+      }
+      return undefined;
+    };
+  }
+
+  private getRouter(): ProviderRouter {
+    const get = this.envReader();
+    const chain = resolveProviderChain("image", get);
+    const fingerprint = chainFingerprint(chain);
+    if (!this.router) {
+      this.router = new ProviderRouter("image", chain, readRouterOptions("image", get));
+      console.log(
+        `[ImageService] provider 链：${chain.map((item) => `${item.name}${item.apiKey || item.provider === "fake" ? "" : "(no-key)"}`).join(" → ")}`,
+      );
+    } else if (fingerprint !== this.routerFingerprint) {
+      this.router.syncChain(chain);
+    }
+    this.routerFingerprint = fingerprint;
+    return this.router;
+  }
+
+  providerHealth(): ProviderHealthSnapshot[] {
+    return this.getRouter().snapshot();
+  }
 
   async generateImage(
     prompt: string,
     options?: { size?: string; referenceImages?: string[] },
   ): Promise<string> {
-    const provider = this.config.get<string>("app.imageProvider") || "fake";
-    const fixtureUrl = this.config.get<string>("app.fakeImageFixtureUrl");
-    if (provider === "fake") return fixtureUrl || placeholderDataUrl("Image fixture");
+    const router = this.getRouter();
+    const plan = router.attemptOrder();
 
-    const baseUrl = this.config.get<string>("app.imageBaseUrl") || "https://api.openai.com/v1";
-    const endpoint = this.config.get<string>("app.imageEndpoint") || "/images/generations";
-    const apiKey = this.config.get<string>("app.imageApiKey") || "";
-    const model = this.config.get<string>("app.imageModel") || "dall-e-3";
-    const isDashScope = baseUrl.includes("dashscope") || endpoint.includes("multimodal-generation");
+    // 与改造前一致：一个 key 都没有时返回占位图，不让流水线整条断掉
+    if (plan.length === 0) return placeholderDataUrl("Image API key missing");
 
-    if (!apiKey) return placeholderDataUrl("Image API key missing");
+    const failures: Array<{ name: string; message: string }> = [];
+    for (let index = 0; index < plan.length; index += 1) {
+      const { candidate } = plan[index];
+
+      if (candidate.provider === "fake") {
+        router.recordSuccess(candidate.name, 0);
+        return this.config.get<string>("app.fakeImageFixtureUrl") || placeholderDataUrl("Image fixture");
+      }
+
+      const startedAt = Date.now();
+      try {
+        const url = await this.attemptGenerateImage(candidate, prompt, options);
+        router.recordSuccess(candidate.name, Date.now() - startedAt);
+        if (index > 0) {
+          console.warn(
+            `[ImageService] 已降级到 ${candidate.name}（前序 ` +
+              `${plan.slice(0, index).map((item) => item.candidate.name).join("、")} 未成功）`,
+          );
+        }
+        return url;
+      } catch (error) {
+        const failure = classifyProviderFailure(error);
+        const message = error instanceof Error ? error.message : String(error);
+        if (!failure.switchable) {
+          console.error(`[ImageService] ${candidate.name} 拒绝请求（${failure.kind}），不切换：${message}`);
+          throw error;
+        }
+        router.recordFailure(candidate.name, error);
+        failures.push({ name: candidate.name, message: message.slice(0, 200) });
+        const next = plan[index + 1];
+        if (next) {
+          console.warn(
+            `[ImageService] ${candidate.name} 失败（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），` +
+              `切换到 ${next.candidate.name}：${message.slice(0, 120)}`,
+          );
+        }
+      }
+    }
+
+    throw new Error(
+      `所有图像 provider 均失败（${failures.map((item) => `${item.name}: ${item.message}`).join("；")}）`,
+    );
+  }
+
+  private async attemptGenerateImage(
+    candidate: ProviderCandidate,
+    prompt: string,
+    options?: { size?: string; referenceImages?: string[] },
+  ): Promise<string> {
+    const isDashScope =
+      candidate.baseUrl.includes("dashscope") || candidate.endpoint.includes("multimodal-generation");
 
     const references = (options?.referenceImages || []).filter(Boolean).slice(0, 4);
     const requestBody = JSON.stringify(
       isDashScope
         ? {
-            model,
+            model: candidate.model,
             input: {
               messages: [
                 {
@@ -40,13 +141,15 @@ export class ImageService {
               size: normalizeDashScopeSize(options?.size || "1024x1024"),
             },
           }
-        : buildAgnesImageBody(model, prompt, options?.size || "1024x1024", references),
+        : buildAgnesImageBody(candidate.model, prompt, options?.size || "1024x1024", references),
     );
 
-    const response = await postWithRateLimitRetry(`${baseUrl}${endpoint}`, {
+    console.log(`[ImageService] 出图(${candidate.name}) → POST ${candidate.baseUrl}${candidate.endpoint}`);
+
+    const response = await postWithRateLimitRetry(`${candidate.baseUrl}${candidate.endpoint}`, {
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${candidate.apiKey}`,
       },
       body: requestBody,
       timeoutMs: 180_000,
@@ -54,16 +157,18 @@ export class ImageService {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error");
-      throw new Error(`Image API error ${response.status}: ${errorText.substring(0, 200)}`);
+      throw new ProviderHttpError(response.status, errorText);
     }
 
     const json = (await response.json()) as Record<string, unknown>;
     let url = extractMediaUrl(json);
     if (!url) {
       const taskId = extractTaskId(json);
-      if (taskId) url = await this.pollDashScopeTask(baseUrl, apiKey, taskId, 180_000);
+      if (taskId) url = await this.pollDashScopeTask(candidate.baseUrl, candidate.apiKey, taskId, 180_000);
     }
-    if (!url) throw new Error(`Image API returned no URL: ${JSON.stringify(json).substring(0, 300)}`);
+    if (!url) {
+      throw new Error(`Image API returned no URL: ${JSON.stringify(json).substring(0, 300)}`);
+    }
     return url;
   }
 

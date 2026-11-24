@@ -5,47 +5,159 @@ import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { extractMediaUrl, extractTaskId, extractTaskStatus } from "./image.service";
+import {
+  ProviderHttpError,
+  ProviderRouter,
+  chainFingerprint,
+  classifyProviderFailure,
+  readRouterOptions,
+  resolveProviderChain,
+  type ProviderCandidate,
+  type ProviderEnvReader,
+  type ProviderHealthSnapshot,
+} from "./provider-routing";
 import { TtsService } from "./tts.service";
 import { planDialogue, type DialogueSegment } from "./dialogue";
 
 @Injectable()
 export class VideoService {
+  /** 熔断状态跨请求累计；链被运行时改写时原地同步，不清零健康度。 */
+  private router: ProviderRouter | null = null;
+  private routerFingerprint = "";
+
   constructor(
     @Inject(ConfigService) private readonly config: ConfigService,
     @Inject(TtsService) private readonly tts: TtsService,
   ) {}
 
+  private envReader(): ProviderEnvReader {
+    const appFallbacks: Record<string, string> = {
+      VIDEO_PROVIDER: "app.videoProvider",
+      VIDEO_BASE_URL: "app.videoBaseUrl",
+      VIDEO_API_KEY: "app.videoApiKey",
+      VIDEO_MODEL: "app.videoModel",
+      VIDEO_ENDPOINT: "app.videoEndpoint",
+    };
+    return (key: string) => {
+      const direct = this.config.get<string>(key);
+      if (typeof direct === "string" && direct.trim()) return direct;
+      const appKey = appFallbacks[key];
+      if (appKey) {
+        const value = this.config.get<string>(appKey);
+        if (typeof value === "string" && value.trim()) return value;
+      }
+      return undefined;
+    };
+  }
+
+  private getRouter(): ProviderRouter {
+    const get = this.envReader();
+    const chain = resolveProviderChain("video", get);
+    const fingerprint = chainFingerprint(chain);
+    if (!this.router) {
+      this.router = new ProviderRouter("video", chain, readRouterOptions("video", get));
+      console.log(
+        `[VideoService] provider 链：${chain.map((item) => `${item.name}${item.apiKey || item.provider === "fake" ? "" : "(no-key)"}`).join(" → ")}`,
+      );
+    } else if (fingerprint !== this.routerFingerprint) {
+      this.router.syncChain(chain);
+    }
+    this.routerFingerprint = fingerprint;
+    return this.router;
+  }
+
+  providerHealth(): ProviderHealthSnapshot[] {
+    return this.getRouter().snapshot();
+  }
+
   async generateVideo(
     prompt: string,
     options?: { imageUrl?: string | null; duration?: number | null; ratio?: string | null },
   ): Promise<string> {
-    const provider = this.config.get<string>("app.videoProvider") || "fake";
-    const fixtureUrl = this.config.get<string>("app.fakeVideoFixtureUrl");
-    if (provider === "fake") return fixtureUrl || "about:blank#video-fixture";
+    const router = this.getRouter();
+    const plan = router.attemptOrder();
 
-    const baseUrl = this.config.get<string>("app.videoBaseUrl") || "https://api.example.com/v1";
-    const configuredEndpoint = this.config.get<string>("app.videoEndpoint") || "";
+    // 与改造前一致：没有可用密钥时返回占位地址，避免整条流水线中断
+    if (plan.length === 0) return "about:blank#video-api-key-missing";
+
+    const failures: Array<{ name: string; message: string }> = [];
+    for (let index = 0; index < plan.length; index += 1) {
+      const { candidate } = plan[index];
+
+      if (candidate.provider === "fake") {
+        router.recordSuccess(candidate.name, 0);
+        return this.config.get<string>("app.fakeVideoFixtureUrl") || "about:blank#video-fixture";
+      }
+
+      const startedAt = Date.now();
+      try {
+        const url = await this.attemptVideo(candidate, prompt, options);
+        router.recordSuccess(candidate.name, Date.now() - startedAt);
+        if (index > 0) {
+          console.warn(
+            `[VideoService] 已降级到 ${candidate.name}（前序 ` +
+              `${plan.slice(0, index).map((item) => item.candidate.name).join("、")} 未成功）`,
+          );
+        }
+        return url;
+      } catch (error) {
+        const failure = classifyProviderFailure(error);
+        const message = error instanceof Error ? error.message : String(error);
+        if (!failure.switchable) {
+          console.error(`[VideoService] ${candidate.name} 拒绝请求（${failure.kind}），不切换：${message}`);
+          throw error;
+        }
+        router.recordFailure(candidate.name, error);
+        failures.push({ name: candidate.name, message: message.slice(0, 200) });
+        const next = plan[index + 1];
+        if (next) {
+          console.warn(
+            `[VideoService] ${candidate.name} 失败（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），` +
+              `切换到 ${next.candidate.name}：${message.slice(0, 120)}`,
+          );
+        }
+      }
+    }
+
+    throw new Error(
+      `所有视频 provider 均失败（${failures.map((item) => `${item.name}: ${item.message}`).join("；")}）`,
+    );
+  }
+
+  private async attemptVideo(
+    candidate: ProviderCandidate,
+    prompt: string,
+    options?: { imageUrl?: string | null; duration?: number | null; ratio?: string | null },
+  ): Promise<string> {
+    const baseUrl = candidate.baseUrl;
+    const configuredEndpoint = candidate.endpoint || "";
     const isDashScope = baseUrl.includes("dashscope");
     const isAgnes = baseUrl.includes("agnes");
     const endpoint =
       isDashScope && (!configuredEndpoint || configuredEndpoint === "/videos/generations")
         ? "/services/aigc/video-generation/video-synthesis"
         : configuredEndpoint || "/videos/generations";
-    const apiKey = this.config.get<string>("app.videoApiKey") || "";
-    const model = this.config.get<string>("app.videoModel") || "video-gen-1";
-
-    if (!apiKey) return "about:blank#video-api-key-missing";
+    const model = candidate.model;
 
     // Agnes AI：POST /v1/videos 创建任务 → 轮询 /agnesapi 取结果
     if (isAgnes) {
-      return this.generateAgnesVideo(baseUrl, apiKey, model, prompt, options, this.config.get<number>("app.videoTimeoutMs"));
+      return this.generateAgnesVideo(
+        baseUrl,
+        candidate.apiKey,
+        model,
+        prompt,
+        options,
+        this.config.get<number>("app.videoTimeoutMs"),
+      );
     }
+
+    console.log(`[VideoService] 出片(${candidate.name}) → POST ${baseUrl}${endpoint}`);
 
     const response = await fetch(`${baseUrl}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${candidate.apiKey}`,
         ...(isDashScope ? { "X-DashScope-Async": "enable" } : {}),
       },
       body: JSON.stringify(
@@ -85,7 +197,7 @@ export class VideoService {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error");
-      throw new Error(`Video API error ${response.status}: ${errorText.substring(0, 200)}`);
+      throw new ProviderHttpError(response.status, errorText);
     }
 
     const json = (await response.json()) as Record<string, unknown>;
@@ -94,7 +206,7 @@ export class VideoService {
 
     const taskId = extractTaskId(json) || stringValue(json.id) || stringValue(json.task_id) || stringValue(json.taskId);
     if (taskId && isDashScope) {
-      const taskUrl = await this.pollDashScopeTask(baseUrl, apiKey, taskId, 300_000);
+      const taskUrl = await this.pollDashScopeTask(baseUrl, candidate.apiKey, taskId, 300_000);
       if (taskUrl) return taskUrl;
       throw new Error(`Video task ${taskId} did not finish within 300 seconds. Please retry this shot later.`);
     }
@@ -419,7 +531,9 @@ export class VideoService {
         response.status === 504 ||
         /queue_full|队列已满|rate.?limit|too many|busy|try again/i.test(errorText);
       if (!retryable || attempt >= maxRetries) {
-        throw new Error(`Agnes Video API error ${response.status}: ${errorText.substring(0, 200)}`);
+        throw new ProviderHttpError(response.status, errorText, {
+          message: `Agnes Video API error ${response.status}: ${errorText.substring(0, 200)}`,
+        });
       }
 
       // 退避：优先读 Retry-After，否则 2^n 指数（5s→10s→20s→40s...，封顶 120s）

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { parseCorsOrigins } from "./cors";
+import { providerEnvPrefix, resolveProviderChain, type ProviderCapability } from "../services/provider-routing";
 
 /**
  * 启动期配置诊断。
@@ -36,7 +37,9 @@ const NUMERIC_CHECKS: NumericCheck[] = [
 ];
 
 const PROVIDERS = ["TEXT", "IMAGE", "VIDEO"] as const;
-const ALLOWED_PROVIDERS = new Set(["openai", "fake"]);
+// 这些值只影响日志与少量请求体嗅探，实际协议按 baseUrl 判定；
+// 放宽枚举是为了让 `TEXT_PROVIDER=agnes` 这类可读写法不再被误报。
+const ALLOWED_PROVIDERS = new Set(["openai", "fake", "dashscope", "agnes", "anthropic"]);
 
 export function checkStartupConfig(
   env: Record<string, string | undefined> = process.env,
@@ -58,16 +61,36 @@ export function checkStartupConfig(
     }
   }
 
-  // 2. provider 完整性：非 fake 必须有 key；provider 值必须是已知枚举
+  // 2. provider 完整性：按候选链逐项检查（没配 *_PROVIDERS 时链长度为 1，等价于旧行为）
   for (const prefix of PROVIDERS) {
-    const providerRaw = env[`${prefix}_PROVIDER`];
-    const provider = (providerRaw || "fake").trim();
-    const key = env[`${prefix}_API_KEY`];
-    summary.push(`${prefix}: provider=${provider}, apiKey=${key ? "已配置" : "未配置"}`);
-    if (!ALLOWED_PROVIDERS.has(provider)) {
-      warnings.push(`${prefix}_PROVIDER=${provider} 不是已知 provider（openai / fake），生成时可能走到错误的分支。`);
-    } else if (provider !== "fake" && !key) {
-      warnings.push(`${prefix}_PROVIDER=${provider} 但未配置 ${prefix}_API_KEY，生成会失败；可在设置面板里补配。`);
+    const capability = prefix.toLowerCase() as ProviderCapability;
+    const chain = resolveProviderChain(capability, (key) => env[key]);
+    if (chain.length === 1) {
+      const [only] = chain;
+      const keyState = only.apiKey || only.provider === "fake" ? "已配置" : "未配置";
+      summary.push(`${prefix}: provider=${only.provider}, apiKey=${keyState}`);
+    } else {
+      summary.push(
+        `${prefix}: providers=${chain
+          .map((item) => `${item.name}(${item.provider}${item.provider === "fake" || item.apiKey ? "" : ",无 key"})`)
+          .join(" → ")}`,
+      );
+    }
+
+    for (const candidate of chain) {
+      if (!ALLOWED_PROVIDERS.has(candidate.provider)) {
+        warnings.push(
+          `${prefix} 的 ${candidate.name} provider=${candidate.provider} 不是已知 provider（${[...ALLOWED_PROVIDERS].join(" / ")}），将按 OpenAI 兼容协议调用。`,
+        );
+      } else if (candidate.provider !== "fake" && !candidate.apiKey) {
+        warnings.push(
+          `${prefix} 的 ${candidate.name} 是 ${candidate.provider} 但未配置 ${prefix}_API_KEY` +
+            `（或 ${prefix}_${providerEnvPrefix(candidate.name)}_API_KEY），该候选会被跳过；可在设置面板里补配。`,
+        );
+      }
+    }
+    if (chain.every((item) => item.provider !== "fake" && !item.apiKey)) {
+      warnings.push(`${prefix} 候选链里没有任何可用密钥，生成将直接返回占位结果。`);
     }
   }
 
