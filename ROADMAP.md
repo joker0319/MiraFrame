@@ -3,7 +3,7 @@
 > 数据截至 2026-11-24，代码基线 `82ae3d4`（42 个提交）。
 > 配套：[RESUME.md](./RESUME.md)（简历写法）、[INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md)（面试口述）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）。
 > 工期单位沿用 `multi-agent-upgrade-plan.md` 的「晚」（每天 2–3 小时）。
-> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），下方 P0 各节保留为实施记录与验收依据，不再是待办。当前待办从 P1 开始。
+> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化也已完成**，下方各节保留为实施记录与验收依据。当前待办：P1-3（工具层/MCP）、P1-4（并发上下文治理）、P1-5（前端测试扩充）。P1-5 已部分完成——前端用例从 4 个增加到 10 个。
 
 ---
 
@@ -109,6 +109,8 @@
 
 ### P1-2 emit `critique_result` + 前端评分可视化
 
+> **状态：已完成（2026-11-24）**。Critic 每轮评审后经 `AgentContext.reportCritique` 上报，`agent.processor.ts` 转 snake_case 载荷广播；前端 `critiqueStore` 收下后由 `CritiquePanel` 渲染总分/阈值/轮次/四维得分/问题/建议，消息流同时留一条文本。补 13 个用例（agent 3 + server 契约 4 + 前端 6）。下方保留原始方案与验收标准。
+
 - **动机**：事件在 `shared/src/constants/events.ts:8`、`types/ws-events.ts:29`、`frontend/src/types/index.ts:56` 三处定义，前端 `useWebSocket.ts:250-260,380` 也监听了，**服务端从来没 emit**。等于「Monitor 闭环」缺了最直观的一环。
 - **动作**：Critic 打分后在 processor 里 emit 事件（带 `overall_score` / `dimensions` / `round` / `passed`）；前端在节点详情展示评分与打回原因。
 - **验收**：分镜被 Critic 打回时，页面实时出现分数和意见，且能在消息流里回溯。
@@ -174,7 +176,7 @@
 | P1-5 前端测试 | 版本 D 可加「前端关键交互 10+ 组件测试」 |
 | P2 多模态 Critic | 版本 E 第 2 条升级为「文本 + 图像双通道评估」 |
 
-> 做完 P1-1 与 P1-2 之后，`INTERVIEW_GUIDE.md` §3 的建议可以从「挑三项讲扎实」改成「挑四项讲扎实」，这是最划算的两晚。
+> P1-1 与 P1-2 都已完成，`INTERVIEW_GUIDE.md` §3 的建议可以从「挑三项讲扎实」改成「挑四项讲扎实」——Monitor 闭环那条短板（`critique_result` 只定义不 emit）已经补掉了。
 
 ---
 

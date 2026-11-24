@@ -78,8 +78,9 @@
 - `:9-10` 阈值与轮次可配（`CRITIC_SCORE_THRESHOLD`、`CRITIC_MAX_ROUNDS`）；`:107` 通过条件是「达标 **或** 到轮次上限」，避免死循环。原先 `.env` 里的 `CRITIQUE_*` 是另一套无人消费的前缀，P0 已统一为 `CRITIC_*`（当前 `6.0` / `2`），并由 `config/startup-check.ts` 在启动期校验取值是否合法。
 - `:124-134` 是关键：不通过时 `nextStage = plan_shots`，并把 issues/suggestions 拼成 `feedback` 回灌；`packages/agent/src/agents/plan.ts:71-81` 在下一轮生成时直接消费这个字段。
 - `:93-104` 模型调用失败或 JSON 坏了，降级为人工审批，不阻断主流程。
+- `:124-152`（P1-2）：评审结论不只写进 state，还经 `AgentContext.reportCritique` 上报，转成 WS `critique_result` 推给前端——分数、阈值、第几轮、四维得分、问题与建议都会实时出现在分镜节点的评分卡片上。「打分」这件事从后台字段变成了屏幕上看得见的东西。
 
-**R** 形成了「生成 → 评估 → 带意见重写 → 再评估」的闭环，且有轮次上限和人工兜底。
+**R** 形成了「生成 → 评估 → 带意见重写 → 再评估」的闭环，且有轮次上限和人工兜底；评审过程对用户可见、可回溯（消息流留文本，卡片留结构）。
 
 **可能被追问**：Evaluator 自己判错了怎么办？→ 两道保险：轮次上限防止来回拉扯，人工审批门作为最终兜底。
 
@@ -146,7 +147,7 @@
 | 工具调用 | `AgentContext` 暴露 `saveOutline` / `createShot` / `callLlm` 等方法 | 可以说清「工具层该长什么样」 | **当前没有 MCP**，是硬编码方法；不要说成接入了 MCP |
 | 多轮记忆 | `messages` 表 + Critic 的 `feedback` 跨轮回灌（`plan.ts:71-81`） | 反馈能改变下一轮生成，不是单轮问答 | 图 checkpoint 已落 PostgreSQL；`messages` 仍是拼接式上下文，不做滚动摘要 |
 | 多 Agent 路由 | Director 规划 + Review 的 `FALLBACK_ROUTE`（`review.ts:9-14,80-82`） | 模型决定路由，失败有白名单兜底 | 节点是类，不是独立进程/服务 |
-| Monitor 闭环 | 29 类 WS 事件（`packages/shared/src/constants/events.ts`）+ `run_*` 事件 + 评分写 state | 进度、门、产物、告警前端实时可见 | `critique_result` 事件定义了但服务端没有 emit |
+| Monitor 闭环 | 29 类 WS 事件（`packages/shared/src/constants/events.ts`）+ `run_*` 事件 + `critique_result` 评分实时下发 + 评分写 state | 进度、门、产物、告警、评分前端实时可见 | 事件是进程内广播，没有做多实例的 Redis adapter |
 | LLM-as-Judge | Critic 四维 rubric + 阈值 + 轮次上限 + 人工兜底 | 真打分、真打回、真回灌 | 只审分镜文本，没审图片/视频 |
 
 > 讲法建议：这六项不要都说成「已完整实现」。挑 **多 Agent 路由 + LLM-as-Judge + Monitor 闭环** 三项讲扎实，其余两项坦诚说「这是下一步要补的」，反而更可信。
@@ -183,14 +184,14 @@
 EchoMind 是智能客服场景的六大考点练习，MiraFrame 是把同一套 Agent 工程能力迁移到内容生成场景：其中 LLM-as-Judge、多 Agent 路由、Monitor 闭环是共通的；MCP 和多轮记忆在 MiraFrame 里还比较弱，是明确的下一步。
 
 **Q10：最大的技术债是什么？**
-`critique_result` 事件空定义、字幕是外挂 SRT 没烧进画面、i2i 修正目前是手动触发、`messages` 仍是拼接式上下文没有滚动摘要。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
+`critique_result` 事件**已补齐**（P1-2：Critic 每轮评审后经 WS 下发评分、阈值、轮次与打回原因，前端节点详情渲染评分卡片）；剩余技术债是字幕外挂 SRT 没烧进画面、i2i 修正目前是手动触发、`messages` 仍是拼接式上下文没有滚动摘要、WS 是进程内广播没接 Redis adapter。DOUBAO 配置、宇宙页面残留、无鉴权配置接口、进程内 checkpointer 等已在 P0/P1-1 中清理完毕。这些都不影响主线演示，但面试被问到要承认。
 
 ---
 
 ## 5. 诚实边界（主动交代比被问出来强）
 
 - **checkpoint（P1-1 已修）**：`packages/agent/src/checkpointer.ts` 的 `createCheckpointer(connectionString)` 返回 `PostgresSaver` 并幂等建表，`agent.processor.ts` 用 `app.databaseUrl` 构造；无连接串时才退回 `MemorySaver`（单测路径）。
-- **`critique_result` 事件**：shared 里定义、前端监听，但服务端没有 emit；Critic 的结果目前只进图状态和消息流。
+- **`critique_result` 事件（P1-2 已修）**：`AgentContext.reportCritique` 由 `CriticAgent` 每轮评审后调用，`agent.processor.ts` 转成 snake_case 载荷经 WS 下发；前端 `critiqueStore` 收下后渲染评分卡片（总分/阈值/轮次/维度/问题/建议），消息流也留一条文本便于回溯。
 - **MCP**：没有接入。Tool Registry 的接入点可以设计，但现在是硬编码 `AgentContext`。
 - **`CRITIC_SYSTEM_PROMPT`**（图像四维 rubric）定义了但 CriticAgent 没调用，当前只审分镜文本。
 - **残留（P0 已清理）**：`DOUBAO_*` 配置与 `app.config.ts` 里的兜底字段、`UniversesPage.tsx` / `UniverseDetailPage.tsx` / `universesApi.ts` 均已删除；宇宙路由保留重定向以免旧链接 404。`config/` 接口已加 `ADMIN_TOKEN` 守卫，CORS 收紧为白名单，明文 `reveal` 接口移除。

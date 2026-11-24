@@ -363,3 +363,22 @@ VIDEO_TIMEOUT_MS=300000
 - `agent/src/__tests__/checkpointer.test.ts`（新，4 个用例）：无连接串降级、有连接串建表、并发共用同一实例、建表失败可重试。
 
 **验证**：agent 包 41 个测试全过（新增 4 个）。
+
+---
+
+## P1-2 critique_result：评审结论实时可视化
+
+**动机**：`critique_result` 在 `shared/constants/events.ts`、`shared/types/ws-events.ts`、`frontend/types/index.ts` 三处都有定义，前端 `useWebSocket` 也监听了，**服务端从来没 emit 过**。结果是 Critic 的分数只躺在图状态里，用户看不到「AI 为什么说这段分镜不行」——Monitor 闭环最直观的一环是空的。
+
+**改动**
+- `shared/types/ws-events.ts`：重写 `CritiqueResultEventDataSchema`。原 schema 用 camelCase（`entityType` / `willRegenerate`）且 `entityId` 要求 uuid，与真实载荷（数字 id、snake_case）完全对不上，属于「定义了但没人能对上」的假契约。改为 snake_case 并补 `stage` / `threshold` / `passed` / `round` / `max_rounds`，让前端能解释「为什么没过、还有几次机会」。
+- `agent/src/agents/base.ts`：新增 `CritiqueReport` 类型与可选方法 `AgentContext.reportCritique`。可选是刻意的——单测和 fake context 不实现时静默跳过，评审本身照常进行。
+- `agent/src/agents/critic.ts`：算完 `score/passed/round` 后上报，单独 try/catch 包住。上报失败只是前端少一张卡片，不能让已经跑完的评审白费。
+- `server/src/agent/critique-payload.ts`（新）：`toCritiqueResultPayload()` 把 camelCase 结论转成 snake_case 载荷。单独成文件而不是塞进 processor，是为了让测试不必拉起 BullMQ/ioredis 整套依赖。
+- `server/src/agent/agent.processor.ts`：在 `ctx` 上实现 `reportCritique`，经 `wsGateway.sendToProject` 广播。
+- `frontend/src/stores/critiqueStore.ts`（新）：`latest` + `history`（保留最近 10 轮，可看收敛轨迹）。
+- `frontend/src/components/project/CritiquePanel.tsx`（新）：总分、阈值进度条、轮次徽章、四维条形、问题与建议列表；未通过时区分「回灌重写」与「到轮次上限转人工」；多轮时显示 `R1 5.5 → R2 8.2`。
+- `frontend/src/components/project/NodeDetail.tsx`：面板挂在分镜节点详情下（与 `ConsistencyPanel` 同级）。
+- `frontend/src/pages/ProjectPage.tsx`：离开项目时 `resetCritique()`，避免看到上一个项目的分数。
+
+**验证**：全仓 **186 个测试全过**（shared 60 / agent 44 / server 72 / frontend 10）。新增 13 个用例：Critic 上报内容与「上报失败不影响结论」3 个（agent）、载荷映射 + 能被 shared schema 校验 + entity_id 省略 4 个（server）、面板渲染与 store 历史截断 6 个（frontend）。其中 server 那条 `safeParse(toCritiqueResultPayload(report))` 是真正的前后端契约测试——只改一侧字段名就会红。
