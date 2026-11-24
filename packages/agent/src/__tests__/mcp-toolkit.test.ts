@@ -27,7 +27,8 @@ describe("createAssetsToolKit", () => {
   let kit: AssetsToolkit;
 
   beforeAll(async () => {
-    const created = await createAssetsToolKit({ enabled: true, root });
+    // 这个文件专测「自实现 stdio 客户端」这条连接层；官方 SDK 那条在 mcp-sdk.test.ts
+    const created = await createAssetsToolKit({ enabled: true, root, transport: "builtin" });
     if (!created) throw new Error("MCP toolkit 连接失败");
     kit = created;
   }, 20000);
@@ -37,6 +38,7 @@ describe("createAssetsToolKit", () => {
   });
 
   it("工具清单可枚举，且带完整参数描述", () => {
+    expect(kit.transport).toBe("builtin");
     expect(kit.registry.names().sort()).toEqual(["list_project_assets", "read_text_asset"]);
     const definitions = kit.registry.list();
     const listTool = definitions.find((item) => item.name === "list_project_assets")!;
@@ -71,7 +73,7 @@ describe("createAssetsToolKit", () => {
   });
 
   it("close 幂等", async () => {
-    const kit2 = await createAssetsToolKit({ enabled: true, root });
+    const kit2 = await createAssetsToolKit({ enabled: true, root, transport: "builtin" });
     expect(kit2).not.toBeNull();
     await kit2!.close();
     await expect(kit2!.close()).resolves.toBeUndefined();
@@ -94,6 +96,7 @@ describe("createAssetsToolKit 的降级路径", () => {
       root,
       serverScript: join(root, "packages/agent/src/tools/mcp/servers/nope.mjs"),
       timeoutMs: 2000,
+      transport: "builtin",
     });
     expect(kit).toBeNull();
   });

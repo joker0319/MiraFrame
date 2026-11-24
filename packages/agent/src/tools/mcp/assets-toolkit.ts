@@ -3,10 +3,15 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { ToolRegistry } from "../registry.js";
 import type { AgentTool } from "../types.js";
 import { McpStdioClient } from "./client.js";
-import { mcpToolsToAgentTools } from "./adapter.js";
+import { mcpToolsToAgentTools, registerAgentTools } from "./adapter.js";
+import { createSdkAssetsToolkit } from "./sdk-toolkit.js";
 
 /**
  * 把 MCP 素材库 server 接进工具层。
+ *
+ * 两条连接层可互换：
+ * - `sdk`：官方 `@langchain/mcp-adapters`（默认）
+ * - `builtin`：项目内按 MCP 规范自实现的 stdio 客户端，零额外依赖
  *
  * 设计取舍：
  * - **失败即降级**：MCP 是增强能力，拉不起子进程时返回 null，节点照常跑；
@@ -20,21 +25,36 @@ const SERVER_RELATIVE_PATHS = [
   "packages/agent/dist/tools/mcp/servers/assets-server.mjs",
 ];
 
+/** 连接层实现 */
+export type McpTransport = "sdk" | "builtin" | "auto";
+
+/** 实际生效的连接层（`auto` 解析后不会留在结果里） */
+export type ResolvedTransport = Exclude<McpTransport, "auto">;
+
 export interface AssetsToolkitOptions {
   /** 项目根；默认从 cwd 向上找 pnpm-workspace.yaml */
   root?: string;
   /** 显式指定 server 脚本路径 */
   serverScript?: string;
-  /** 单次 RPC 超时，默认 6s */
+  /** 单次 RPC 超时，默认 6s（仅 builtin 生效；SDK 自身无该参数） */
   timeoutMs?: number;
   /** 显式关闭（测试里用，避免每次跑测试都拉起子进程） */
   enabled?: boolean;
+  /** 连接层，默认 auto：先走官方 SDK，失败回落自实现 */
+  transport?: McpTransport;
+}
+
+export interface AssetsToolkitTuning {
+  root: string;
+  timeoutMs: number;
 }
 
 export interface AssetsToolkit {
   registry: ToolRegistry;
   tools: AgentTool[];
   serverInfo: { name?: string; version?: string };
+  /** 这次实际用的是哪条连接层 */
+  transport: ResolvedTransport;
   /** 关闭子进程；重复调用安全 */
   close: () => Promise<void>;
 }
@@ -61,6 +81,13 @@ function resolveServerScript(root: string, explicit?: string): string | null {
   return null;
 }
 
+function resolveTransport(explicit?: McpTransport): McpTransport {
+  if (explicit) return explicit;
+  const fromEnv = process.env.MIRAFRAME_MCP_TRANSPORT;
+  if (fromEnv === "sdk" || fromEnv === "builtin" || fromEnv === "auto") return fromEnv;
+  return "auto";
+}
+
 /**
  * 连接 MCP 素材库 server 并把远端工具注册进一个新的 ToolRegistry。
  * 任何一步失败都返回 null（打一条 warn），调用方无需 try/catch。
@@ -82,11 +109,33 @@ export async function createAssetsToolKit(options: AssetsToolkitOptions = {}): P
     return null;
   }
 
+  const tuning: AssetsToolkitTuning = { root, timeoutMs: options.timeoutMs ?? 6000 };
+  const transport = resolveTransport(options.transport);
+
+  if (transport === "builtin") {
+    return buildBuiltin(serverScript, tuning);
+  }
+
+  try {
+    return await createSdkAssetsToolkit(serverScript, tuning);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (transport === "sdk") {
+      console.warn(`[mcp:assets] MCP 服务不可用（sdk），跳过远端工具：${message}`);
+      return null;
+    }
+    console.warn(`[mcp:assets] 官方 SDK 连接失败，回落到内置 stdio 客户端：${message}`);
+    return buildBuiltin(serverScript, tuning);
+  }
+}
+
+/** 自实现 stdio 客户端连接层（无第三方依赖，作为 SDK 的对照与兜底） */
+async function buildBuiltin(serverScript: string, tuning: AssetsToolkitTuning): Promise<AssetsToolkit | null> {
   const client = new McpStdioClient({
     command: process.execPath,
-    args: [serverScript, `--root=${root}`],
-    cwd: root,
-    timeoutMs: options.timeoutMs ?? 6000,
+    args: [serverScript, `--root=${tuning.root}`],
+    cwd: tuning.root,
+    timeoutMs: tuning.timeoutMs,
   });
 
   try {
@@ -95,25 +144,14 @@ export async function createAssetsToolKit(options: AssetsToolkitOptions = {}): P
     const tools = mcpToolsToAgentTools(client, descriptors);
 
     const registry = new ToolRegistry();
-    const registered: AgentTool[] = [];
-    for (const tool of tools) {
-      try {
-        registry.register(tool);
-        registered.push(tool);
-      } catch (error) {
-        console.warn(
-          `[mcp:assets] 工具 ${tool.definition.name} 注册失败（可能与本地工具重名）：${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
+    const registered = registerAgentTools(registry, tools);
 
     let closed = false;
     return {
       registry,
       tools: registered,
       serverInfo: client.info,
+      transport: "builtin",
       close: async () => {
         if (closed) return;
         closed = true;
