@@ -3,7 +3,7 @@
 > 数据截至 2026-11-24，代码基线 `82ae3d4`（42 个提交）。
 > 配套：[RESUME.md](./RESUME.md)（简历写法）、[INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md)（面试口述）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）。
 > 工期单位沿用 `multi-agent-upgrade-plan.md` 的「晚」（每天 2–3 小时）。
-> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化也已完成**，下方各节保留为实施记录与验收依据。当前待办：P1-3（工具层/MCP）、P1-4（并发上下文治理）、P1-5（前端测试扩充）。P1-5 已部分完成——前端用例从 4 个增加到 10 个。
+> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理也已完成**，下方各节保留为实施记录与验收依据。当前待办：P1-3（工具层/MCP）、P1-5（前端测试扩充）。P1-5 已部分完成——前端用例从 4 个增加到 10 个。
 
 ---
 
@@ -126,6 +126,8 @@
 - **提醒**：别为凑热词挂一堆没用的 server，一个真实调用胜过五个空壳。
 
 ### P1-4 收尾并发上下文治理
+
+> **状态：已完成（2026-11-24）**。删除 `_nodeCtx` 全局兜底与 `setNodeContext` / `clearNodeContext`，`getNodeCtx()` 只从 ALS 取、取不到直接抛 `[agent:ctx] 图节点拿不到 AgentContext`；mock context 只留在测试文件里。新增 4 个用例：缺失上下文显式报错 ×2、8 个 job 并发不串号、单 job 缺上下文不影响其它 job。同时确认 `graph.test.ts` 里 ALS 能穿透 LangGraph 内部异步边界（原来靠 `try/catch` 吞异常，实际从未验证过）。
 
 - **动机**：`agent.processor.ts:18` BullMQ `concurrency: 8`，但 `:51` 每个 job 新建进程内 `MemorySaver`，`nodes/index.ts:49,67-89` 还留着全局 `_nodeCtx` 兜底 + 取不到上下文就返回 `"{}"` 的 mock 静默降级 —— 并发下理论上会串号或静默产出空结果。已有幂等控制（`agent.service.ts:128-130` jobId、`:212-226` 同项目取消旧 run），别重复造。
 - **动作**：删 `_nodeCtx` 兜底，ALS 取不到直接抛错；mock context 只保留在测试里；配合 P1-1 的持久化 checkpointer 说明并发模型。

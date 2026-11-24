@@ -382,3 +382,21 @@ VIDEO_TIMEOUT_MS=300000
 - `frontend/src/pages/ProjectPage.tsx`：离开项目时 `resetCritique()`，避免看到上一个项目的分数。
 
 **验证**：全仓 **186 个测试全过**（shared 60 / agent 44 / server 72 / frontend 10）。新增 13 个用例：Critic 上报内容与「上报失败不影响结论」3 个（agent）、载荷映射 + 能被 shared schema 校验 + entity_id 省略 4 个（server）、面板渲染与 store 历史截断 6 个（frontend）。其中 server 那条 `safeParse(toCritiqueResultPayload(report))` 是真正的前后端契约测试——只改一侧字段名就会红。
+
+---
+
+## P1-4 并发上下文治理：删掉全局兜底，只留 ALS
+
+**动机**：processor 的 BullMQ worker 是 `concurrency: 8`，但节点上下文原先有两套来源：`AsyncLocalStorage` 和模块级 `_nodeCtx`。`setNodeContext(ctx)` 写全局、`clearNodeContext()` 在 job 结束时清全局——A 项目的 job 完全可能拿到 B 项目的 ctx 去写库；更隐蔽的是取不到上下文时返回 mock ctx，`callLlm` 直接吐 `"{}"`，产物静默变空而任务状态还是成功。这类 bug 不会报错，只会「生成出来的东西莫名其妙」。
+
+**改动**
+- `agent/src/nodes/index.ts`：删除 `_nodeCtx`、`setNodeContext()`、`clearNodeContext()` 与整段 mock 降级；`getNodeCtx()` 只读 ALS，取不到抛 `[agent:ctx] 图节点拿不到 AgentContext：图必须在 runWithNodeContext(ctx, ...) 作用域内执行。并发场景不提供全局兜底，以免多个 job 串号。`
+- `agent/src/index.ts`：导出收敛为只剩 `runWithNodeContext`（删掉另外两个，避免有人再写全局注入）。
+- `server/src/agent/agent.processor.ts`：去掉 `setNodeContext(ctx)` 与 `finally` 里的 `clearNodeContext()`；上下文只由 `runWithNodeContext(ctx, () => graph.invoke(...))` 绑定。
+- `server/src/__tests__/supervisor-e2e.spec.ts`：同步去掉全局注入调用。
+- `agent/src/__tests__/graph.test.ts`：原先用 `try/catch` 吞掉图执行的任何异常来「通过」，去掉兜底后这种写法会掩盖真实错误。改为在 `runWithNodeContext` 里 invoke，并断言 `isInterrupted(result)` 为真、`gate === "outline_approval"`——这一步同时验证了 **ALS 能穿透 LangGraph 内部的异步边界**（这是删兜底的唯一前提风险）。
+- `agent/src/__tests__/node-context.test.ts`（新，4 个用例）：无上下文时 `planOutlineNode` 拒绝并给出可定位的错误文案；8 个不同 `projectId` 的 job 并发跑 Critic 节点、故意错开 LLM 延迟，断言每份 `reportCritique` 回报的 issues/suggestions/score 都来自自己的 job、`critiqueScores` 也各归各的；单个 job 缺上下文不影响其它 job。
+
+**为什么不是所有共享都要清**：模块级共享只剩两类——Agent 实例（`BaseAgent` 只有 `readonly name`，无状态）和 `checkpointer` 单例（内部 pg 连接池，本来就该复用，且不持有项目上下文）。这两者共享是正确设计，与「用全局变量传请求上下文」是两回事，面试时可以明确区分。
+
+**验证**：全仓 **190 个测试全过**（shared 60 / agent 48 / server 72 / frontend 10），`pnpm build`、`pnpm typecheck` 均通过。真实双项目并发生成未实测（要跑两次完整生成），但单元级 8 路并发已覆盖上下文隔离语义。
