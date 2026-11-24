@@ -348,6 +348,18 @@ export class TextService {
       });
     }
 
+    // 滚动摘要：fake 模式下给一段结构化摘要，让「多轮记忆」本地也能演示
+    if (normalized.includes("memory")) {
+      const turnCount = (prompt.match(/【第 \d+ 轮】/g) ?? []).length;
+      return [
+        "第 1 轮：用户要求冷色调与雨夜氛围，保留结尾的灯笼特写；",
+        "第 2 轮：确认跳过独立角色图阶段，先出分镜再审。",
+        turnCount > 0 ? `（本次合并了 ${turnCount} 轮更早对话）` : "",
+      ]
+        .filter(Boolean)
+        .join("");
+    }
+
     if (normalized.includes("shot")) {
       return JSON.stringify({
         shots: [

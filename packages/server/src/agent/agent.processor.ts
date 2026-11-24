@@ -16,6 +16,7 @@ import type { GenerationInput } from "./agent.service";
 import { buildInitialState, buildProjectContext, buildConversationHistory } from "./agent-run-state";
 import { buildArtifactLineage, matchCharacterIds, type LineageCharacter } from "./lineage";
 import { toCritiqueResultPayload } from "./critique-payload";
+import { ConversationMemoryService } from "./conversation-memory.service";
 
 @Processor("generation", { concurrency: 8 })
 @Injectable()
@@ -30,6 +31,7 @@ export class AgentProcessor extends WorkerHost {
 	    @Inject(VideoService) private readonly videoService: VideoService,
 	    @Inject(ConsistencyService) private readonly consistencyService: ConsistencyService,
 	    @Inject(ConfigService) private readonly config: ConfigService,
+	    @Inject(ConversationMemoryService) private readonly memoryService: ConversationMemoryService,
 	  ) {
     super();
   }
@@ -73,9 +75,11 @@ export class AgentProcessor extends WorkerHost {
 
     // ---- 历史对话上下文 ----
     // messages 表此前只写不读，导致用户的第二轮反馈（"改回第一版但保留结尾"）
-    // 对模型来说是一句没有指代对象的话。这里读回最近消息并配对成轮次。
+    // 对模型来说是一句没有指代对象的话。这里读回最近消息并配对成轮次；
+    // 滑出保留窗口的旧轮次先折叠成滚动摘要，再注入 prompt。
     const historyRows = await this.db
       .select({
+        id: schema.messages.id,
         agent: schema.messages.agent,
         role: schema.messages.role,
         content: schema.messages.content,
@@ -85,13 +89,20 @@ export class AgentProcessor extends WorkerHost {
       .from(schema.messages)
       .where(eq(schema.messages.projectId, projectId))
       .orderBy(asc(schema.messages.createdAt), asc(schema.messages.id))
-      .limit(60);
+      .limit(120);
+    const memory = await this.memoryService.ensure(projectId, historyRows, {
+      excludeLatestUser: Boolean(job.data.feedback),
+    });
     const conversationHistory = buildConversationHistory(historyRows, {
       excludeLatestUser: Boolean(job.data.feedback),
+      memorySummary: memory.summary,
+      coveredThroughId: memory.coveredThroughId,
     });
     const contextBlock = conversationHistory ? `${projectContext}\n\n${conversationHistory}` : projectContext;
     if (conversationHistory) {
-      console.log(`[processor] 注入历史对话 ${conversationHistory.length} chars`);
+      console.log(
+        `[processor] 注入历史对话 ${conversationHistory.length} chars（摘要 ${memory.summary.length} 字，覆盖 ${memory.coveredTurns} 轮）`,
+      );
     }
 
     // 角色是在 plan_characters 节点里才创建的，run 开头查一定为空 → 惰性加载，

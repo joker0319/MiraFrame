@@ -211,6 +211,19 @@ export const messages = pgTable(
   }),
 );
 
+// ── Conversation memory（滚动摘要）──
+// 每个项目一行：把「已经滑出最近窗口」的旧轮次压成一段摘要，
+// coveredThroughId 记录摘要覆盖到哪条消息，保证增量折叠不重复、不漏。
+export const conversationMemory = pgTable("conversation_memory", {
+  projectId: integer("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  summary: text("summary").notNull().default(""),
+  coveredThroughId: integer("covered_through_id").notNull().default(0),
+  coveredTurns: integer("covered_turns").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ── Relations ──
 export const projectRelations = relations(projects, ({ many }) => ({
   characters: many(characters),
