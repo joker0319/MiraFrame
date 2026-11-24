@@ -9,7 +9,6 @@ export class OutlineAgent extends BaseAgent {
   }
 
   async run(ctx: AgentContext, state: Phase2StateType): Promise<Partial<Phase2StateType>> {
-    console.log(">>> [OutlineAgent] 被调用了, state =", JSON.stringify(state, null, 2));
     await this.sendMessage(ctx, "开始生成故事大纲...", { progress: 0.05, isLoading: true, stage: "plan_outline" });
     await this.sendThinking(ctx, "planning", "分析故事要素：主题、世界观、情感弧线...");
 

@@ -31,14 +31,8 @@ export class VideoService {
       isDashScope && (!configuredEndpoint || configuredEndpoint === "/videos/generations")
         ? "/services/aigc/video-generation/video-synthesis"
         : configuredEndpoint || "/videos/generations";
-    const apiKey =
-      this.config.get<string>("app.videoApiKey") ||
-      this.config.get<string>("app.doubaoApiKey") ||
-      "";
-    const model =
-      this.config.get<string>("app.videoModel") ||
-      this.config.get<string>("app.doubaoVideoModel") ||
-      "video-gen-1";
+    const apiKey = this.config.get<string>("app.videoApiKey") || "";
+    const model = this.config.get<string>("app.videoModel") || "video-gen-1";
 
     if (!apiKey) return "about:blank#video-api-key-missing";
 
@@ -72,7 +66,7 @@ export class VideoService {
                   : {}),
               },
               parameters: {
-                duration: options?.duration || this.config.get<number>("app.doubaoVideoDuration") || 5,
+                duration: options?.duration || 5,
                 resolution: "720P",
                 prompt_extend: true,
                 watermark: false,
@@ -82,8 +76,8 @@ export class VideoService {
               model,
               prompt,
               image_url: options?.imageUrl || undefined,
-              duration: options?.duration || this.config.get<number>("app.doubaoVideoDuration") || 5,
-              ratio: options?.ratio || this.config.get<string>("app.doubaoVideoRatio") || "adaptive",
+              duration: options?.duration || 5,
+              ratio: options?.ratio || "adaptive",
             },
       ),
       signal: AbortSignal.timeout(300_000),

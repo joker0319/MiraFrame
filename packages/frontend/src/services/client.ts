@@ -175,4 +175,3 @@ export { configApi } from "./configApi";
 export { styleTemplatesApi } from "./styleTemplatesApi";
 export { exportApi } from "./exportApi";
 export { consistencyApi } from "./consistencyApi";
-export { universesApi } from "./universesApi";

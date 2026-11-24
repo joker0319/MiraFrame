@@ -339,3 +339,13 @@ VIDEO_TIMEOUT_MS=300000
 - `ConsistencyPanel.tsx`：`review` / `drift` 镜头多一个「按参考图修正」按钮，重画后自动刷新报告并提示新判定；沿用纸墨语义色与 `btn` 工具类。
 
 **验证**：新增 5 个单测（请求体结构、提示词映射、参考图收集、写入字段、无参考图早失败）；后端 50 个测试全过，前后端 `tsc` 0 错误，`vite build` 通过。用一次性临时项目端到端调用新接口：生成 i2i 新图，沈鸢距离 0.2562、判定 `ok`，结果落库并广播 `shot_updated`，随后临时项目已删除，project-23 数据未改动。
+
+---
+
+## P0 加固：安全收口、配置治理、工程卫生、最小 CI
+
+- **安全**：新增 `modules/config/admin.guard.ts`，`PUT /api/v1/config` 与 `POST /test-connection` 受 `X-Admin-Token` 保护（前端 `fetchApi` 已统一注入该 header）；未配置 `ADMIN_TOKEN` 时视为本地开发模式放行，由启动日志明确告警。移除无调用方的明文 `reveal` 接口及前端 `revealValue`。`main.ts` 的 `enableCors()` 改为读取既有 `app.corsOrigins` 白名单；WS 网关共用同一套解析，`join` 增加项目 ID 格式校验与 DB 存在性校验（抽成零依赖纯函数 `ws/room.ts`）。
+- **配置治理**：新增 `config/cors.ts`、`config/startup-check.ts`（Zod 启动期诊断，只告警不 fail-fast，保留 fake provider 与运行时补配能力）；统一 Critic 前缀为 `CRITIC_SCORE_THRESHOLD=6.0` / `CRITIC_MAX_ROUNDS=2`，删除 `app.config.ts` 里无人消费的 `CRITIQUE_*` 与 `DOUBAO_*` 字段、`.env` 重复 `TTS_ENABLED`、DOUBAO 配置段及视频服务中的豆包兜底引用。
+- **工程卫生**：删除 agent 层三处调试探针日志、已下线的宇宙页面与 `universesApi`（含两处 barrel 导出）、`db:push` 脚本；挂载此前定义但未使用的 `ErrorBoundary`；删除 `getProviderLabel` 里的 doubao 死映射。
+- **CI**：新增 `.github/workflows/ci.yml`（`install --frozen-lockfile` → `build` → `typecheck` → `pnpm -r test`）；移除空转的 `test:e2e` 脚本（无 playwright 依赖与配置）。
+- **验证**：`pnpm build` / `pnpm typecheck` 全通过，全仓 **167 个测试全过**（新增 `p0-hardening.test.ts` 18 个，覆盖 CORS 解析、房间 ID、常量时间比较、AdminGuard 四种分支、启动诊断六类告警）。后端进程在本环境未能后台拉起，端到端 curl 验证留待后续。

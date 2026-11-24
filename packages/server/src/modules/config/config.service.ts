@@ -91,11 +91,6 @@ export class RuntimeConfigService {
     };
   }
 
-  reveal(key: string): { key: string; value: string | null } {
-    if (!CONFIG_BY_KEY.has(key)) return { key, value: null };
-    return { key, value: process.env[key] || null };
-  }
-
   async testConnection(service: "llm" | "image" | "video", overrides?: Record<string, string | null>) {
     const config = {
       ...Object.fromEntries(CONFIG_DEFINITIONS.map(({ key }) => [key, process.env[key] || null])),

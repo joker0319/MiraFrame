@@ -65,7 +65,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 3. 落地 4 个 `interrupt` 人工门 + DB 持久化等待位置 + Redis 恢复；`target_stage` 阶段续跑配合血缘分析实现增量重生成。
 4. 治理外部依赖：文本 429 串行队列 + `Retry-After`/指数退避，视频 503/队列满分类重试（8 次、封顶 120s），供应商差异全部收敛到配置层；曾以最小只读探测定位成本问题并改用免费模型。
 5. 构建一致性闭环：face-api wasm 提速约 23×（41s → 1.8s）→ 镜头图生成后自动校验并落库告警 → 参考图 i2i 反哺修正；6 镜头 / 3 角色项目端到端 1.85s。
-6. 完成成片链路与工程化：逐镜头 macOS TTS 对白配音、原声底噪处理与 `final.srt` 字幕，输出约 34s 成片；pnpm monorepo 四包共享 Zod 契约，149 个测试用例、前后端 `tsc` 0 错误、`vite build` 通过。
+6. 完成成片链路与工程化：逐镜头 macOS TTS 对白配音、原声底噪处理与 `final.srt` 字幕，输出约 34s 成片；pnpm monorepo 四包共享 Zod 契约，167 个测试用例、CI 保障 `build` / `typecheck` / 全量测试通过。
 
 ---
 
@@ -95,7 +95,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 | 数据 | 口径 / 出处 |
 | --- | --- |
 | 42 个提交、4 个包、163 个 TS/TSX 文件 | `git rev-list --count HEAD`；含 16 个测试文件，非测试 147 个 |
-| 149 个测试用例 / 16 个测试文件；后端 50 全过；前后端 `tsc` 0 错误、`vite build` 通过 | 各包 `__tests__/`；`INTERVIEW_GUIDE.md` §0 |
+| 167 个测试用例 / 17 个测试文件；后端 68 全过；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个；`INTERVIEW_GUIDE.md` §0 |
 | 6 个生产阶段、4 个人工门、29 类 WS 事件、16 个 stage 定义 | `shared/src/constants/{events,stages}.ts`、`agent/src/nodes/index.ts` |
 | face-api 9 张图 41s → 1.8s（约 23×） | wasm 后端 + 模型单例缓存，`face.service.ts` |
 | 一致性端到端 1.85s（6 镜头 / 3 角色） | project-23，`GET /consistency?refresh=1` |
@@ -165,9 +165,9 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 
 ## 7. 诚实红线（写了就是给自己挖坑）
 
-- **没做的**：MCP、独立意图分类器、图像/视频多模态 Critic、生产级 checkpoint 持久化、provider 智能选路、字幕烧录、CI/E2E。
+- **没做的**：MCP、独立意图分类器、图像/视频多模态 Critic、生产级 checkpoint 持久化、provider 智能选路、字幕烧录。（CI 已在 P0 补齐，跑 build / typecheck / 全量测试。）
 - **半成品**：checkpoint 目前是进程内 `MemorySaver`，重启丢的是「图执行到哪一步」，不是产物；`critique_result` 事件定义了但服务端未 emit；工具层只有大纲节点接入。
-- **配置陷阱**：`.env` 里 `CRITIQUE_SCORE_THRESHOLD=6.0` 实际不生效（真正生效的是 `critic.ts` 读的 `CRITIC_SCORE_THRESHOLD`，默认 7）；被问「阈值怎么配」时别答错。
+- **配置口径**：Critic 阈值统一为 `CRITIC_SCORE_THRESHOLD=6.0`（由 `agents/critic.ts` 读取），不再有 `CRITIQUE_*` 双前缀；启动期会校验数值合法性并告警。
 - **原型局限**：免费模型 + 本地 PostgreSQL/Redis；face-api 对半透明、背影、非人形参考图检不出脸；i2i 修正手动触发且会清空该镜视频。
 - **成本教训**：早期一次探测误用付费模型产生约 ¥17–27 费用，之后把 provider 全量配置化并定下「探测只读、最小单任务」规则 —— 这段适合口述，不适合写进简历。
 

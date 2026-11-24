@@ -350,7 +350,7 @@ LangGraph.js 工作流层，负责把创作流程拆成多个节点并维护状�
 | 图像生成    | `IMAGE_PROVIDER`, `IMAGE_BASE_URL`, `IMAGE_API_KEY`, `IMAGE_MODEL`, `IMAGE_ENDPOINT` |
 | 视频生成    | `VIDEO_PROVIDER`, `VIDEO_BASE_URL`, `VIDEO_API_KEY`, `VIDEO_MODEL`, `VIDEO_ENDPOINT` |
 | 语音 / 音乐 | `TTS_ENABLED`, `TTS_DEFAULT_VOICE`, `BGM_ENABLED`, `BGM_VOLUME`                      |
-| 工作流     | `CRITIQUE_ENABLED`, `CRITIQUE_SCORE_THRESHOLD`, `CRITIQUE_MAX_ROUNDS`                |
+| 工作流     | `CRITIC_SCORE_THRESHOLD`, `CRITIC_MAX_ROUNDS`（由 agent 包读取）                   |
 
 ---
 

@@ -1,4 +1,5 @@
 import { registerAs } from "@nestjs/config";
+import { parseCorsOrigins } from "./cors";
 
 /**
  * 应用配置 — 对标老项目 backend/app/config.py Settings
@@ -97,13 +98,7 @@ export const appConfig = registerAs("app", () => ({
   // 角色一致性判定阈值（人脸特征欧氏距离）：≤ ok 视为同一人，> drift 视为漂移
   faceOkDistance: parseFloat(process.env.FACE_OK_DISTANCE || "0.45"),
   faceDriftDistance: parseFloat(process.env.FACE_DRIFT_DISTANCE || "0.6"),
-  // 豆包
-  doubaoApiKey: process.env.DOUBAO_API_KEY || null,
-  doubaoVideoModel:
-    process.env.DOUBAO_VIDEO_MODEL || "doubao-seedance-1-5-pro-251215",
-  doubaoVideoDuration: parseInt(process.env.DOUBAO_VIDEO_DURATION || "5", 10),
-  doubaoVideoRatio: process.env.DOUBAO_VIDEO_RATIO || "adaptive",
-  doubaoGenerateAudio: process.env.DOUBAO_GENERATE_AUDIO !== "false",
+  // 豆包：已下线。视频服务统一使用 VIDEO_* 配置，不再保留遗留兜底字段。
   // Fake
   fakeVideoFixtureUrl: process.env.FAKE_VIDEO_FIXTURE_URL || null,
   fakeVideoFixturePath: process.env.FAKE_VIDEO_FIXTURE_PATH || null,
@@ -136,25 +131,8 @@ export const appConfig = registerAs("app", () => ({
   thinkingChainEnabled: process.env.THINKING_CHAIN_ENABLED !== "false",
   thinkingChainDetailLevel:
     process.env.THINKING_CHAIN_DETAIL_LEVEL || "normal",
-  critiqueEnabled: process.env.CRITIQUE_ENABLED !== "false",
-  critiqueScoreThreshold: parseFloat(
-    process.env.CRITIQUE_SCORE_THRESHOLD || "6.0",
-  ),
-  critiqueMaxRounds: parseInt(process.env.CRITIQUE_MAX_ROUNDS || "2", 10),
+  // Critic 阈值/轮次由 agent 包直接读 CRITIC_* 环境变量，这里不再重复定义死配置。
   outlineEnabled: process.env.OUTLINE_ENABLED !== "false",
 }));
 
 export type AppConfig = ReturnType<typeof appConfig>;
-
-function parseCorsOrigins(raw?: string): string[] {
-  if (!raw) return ["*"];
-  try {
-    // 支持 JSON 数组格式: ["http://a","http://b"] 或逗号分隔
-    if (raw.startsWith("[")) {
-      return JSON.parse(raw) as string[];
-    }
-    return raw.split(",").map((s) => s.trim());
-  } catch {
-    return raw.split(",").map((s) => s.trim());
-  }
-}

@@ -44,7 +44,6 @@ function getProviderLabel(key: string): string {
   const map: Record<string, string> = {
     anthropic: "Anthropic",
     openai: "OpenAI",
-    doubao: "Doubao",
     fake: "Fake（本地测试）",
     "inherit-default": "继承默认",
   };

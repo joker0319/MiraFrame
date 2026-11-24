@@ -1,5 +1,8 @@
 /**
- * Config API — system configuration, connection testing, sensitive value reveal.
+ * Config API — system configuration and connection testing.
+ *
+ * 敏感值只在 GET /config 里以脱敏形式返回；服务端不再提供明文读取接口。
+ * 写操作需要 X-Admin-Token（由 fetchApi 从 localStorage 统一注入）。
  */
 import { fetchApi } from "./client";
 import type { ConfigItem, ConfigValue } from "@/types";
@@ -58,11 +61,5 @@ export const configApi = {
     }>("/api/v1/config/test-connection", {
       method: "POST",
       body: JSON.stringify({ service, config_overrides: configOverrides }),
-    }),
-
-  revealValue: (key: string) =>
-    fetchApi<{ key: string; value: string | null }>("/api/v1/config/reveal", {
-      method: "POST",
-      body: JSON.stringify({ key }),
     }),
 };

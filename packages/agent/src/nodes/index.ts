@@ -168,13 +168,10 @@ function isApprovedResume(value: unknown): boolean {
 }
 
 export function outlineApprovalNode(state: Phase2StateType): Partial<Phase2StateType> {
-  // 🔬 临时探针：观察大纲门（新起 run 模式）会不会重跑
-  console.log(">>> [门] outline_approval 进入");
   const resumeValue = interrupt({
     question: "确认故事大纲？",
     gate: "outline_approval",
   });
-  console.log(">>> [门] outline_approval 拿到 resume =", JSON.stringify(resumeValue));
   return {
     approvalHistory: {
       ...(state.approvalHistory || {}),
@@ -184,13 +181,10 @@ export function outlineApprovalNode(state: Phase2StateType): Partial<Phase2State
 }
 
 export function charactersApprovalNode(state: Phase2StateType): Partial<Phase2StateType> {
-  // 🔬 临时探针：观察角色门（resume 模式）会不会重跑
-  console.log(">>> [门] characters_approval 进入");
   const resumeValue = interrupt({
     question: "确认角色设定？",
     gate: "characters_approval",
   });
-  console.log(">>> [门] characters_approval 拿到 resume =", JSON.stringify(resumeValue));
   return {
     approvalHistory: {
       ...(state.approvalHistory || {}),
