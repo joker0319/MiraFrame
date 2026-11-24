@@ -294,7 +294,7 @@ VIDEO_TIMEOUT_MS=300000
 - `services/face.service.ts`：重写初始化（wasm 优先 + cpu 兜底 + `env.monkeyPatch`）；新增 `detect(pathOrBuffer)` 返回原图坐标 + 128 维 descriptor，检测前按长边缩到 640；保留 `detectFaces(base64)` 兼容 sidecar。
 - `services/consistency.ts`（新，纯函数）：判定逻辑。多角色同框用「全局最近优先的贪心指派」，保证一张脸只对应一个角色；额外人脸分三类 —— `other_character`（别的已登记角色）、`lookalike`（和本镜已指派的角色撞脸，多半是重复检出）、`unknown`（谁都不像）。
 - `services/consistency.service.ts`（新）：下载图片（按 URL 哈希缓存到 tmp）、跑检测、调判定。进程内按 URL 缓存检测结果，重复调用不重算。
-- `GET /api/v1/projects/:id/consistency?refresh=1`：按需计算返回报告，不落库。
+- `GET /api/v1/projects/:id/consistency?refresh=1`：按需计算返回报告，并把逐镜结论写回 shot（镜头图自动生成时也会写，见下一节）。
 - `ConsistencyPanel.tsx`（新）：挂在「角色设定」「镜头画面」两个节点的详情面板底部，进入即自动检查一次，可「重新检查」；顶部汇总 + 每镜一行（编号 / 状态点 / 结论 / 右侧各角色距离）。
 - `consistencyApi.ts` + `types/index.ts`：原来那套 `consistency-eval` / `consistency-report` / `eval_id` 的契约是设想中的异步方案（要建表存报告、跑后台任务），后端从未实现，前端也从没调用过 —— 连同 `FaceMatchDetailRead` / `CharacterConsistencyRead` / `ProjectConsistencyRead` 一并替换成实际契约。
 
@@ -309,3 +309,18 @@ VIDEO_TIMEOUT_MS=300000
 - 端到端 1.85 秒（含 9 张图下载 + 推理），命中缓存后更快。
 
 **验证**：新增 16 个单测（多角色同框不抢脸、灰区措辞、缺人、无参考图不诬告、多参考图取最近、陌生脸/撞脸分类）；后端 44 个测试全通过；`tsc` 0 错误；浅色 + 墨夜双主题截图核对。
+
+## 一致性校验接入生成流水线：镜头图一完成就自动查
+
+**目标**：一致性面板原来要用户手动点进节点才知道结果。现在 `render_shot_images` 阶段一结束（含续跑 `target_stage=render_shot_images`）自动跑同一套校验，把结论写到每个镜头，工作台节点卡直接提示。
+
+**改动**
+- `shot` 表新增 `consistency_result` JSONB 列（迁移 `0002_tired_boomer.sql`），存 `ShotResult + checkedAt`。镜头图或角色参考图被重生成时立即清成 null，避免红点滞后。
+- `ConsistencyService.analyzeAndStore()`：跑完判定后逐镜写库；`analyze()` 改为进程内串行队列 —— face-api 的 wasm 后端并发调用不安全，多个生成 worker 同时到达时排队而不是一起踩内存。
+- `AgentProcessor.autoCheckConsistency()`：挂在 `generateShotFrames()` 末尾。人脸模型未就绪、图片下载失败只 warn，**不阻断生成流水线**；完成则发 `consistency_eval_completed` WebSocket 事件（`source=auto` + 逐镜结果）让前端即时更新。
+- 前端：`Shot` 类型与 `normalizeShot` 认识 `consistency_result`；新增 `setShotConsistency` store action；节点卡在 `drift > 0` 时标题旁出现红点（hover 显示漂移/待确认数量）；「镜头画面」详情里漂移镜头直接标「角色长相漂移」。
+- `GET /consistency?refresh=1` 也复用 `analyzeAndStore()`，手动复查与自动校验写的是同一份字段。
+
+**为什么只给 drift 红点**：`review`（0.45–0.60 灰区）本身是不确定而非明确失败，已经由面板的黄色「待确认」呈现；节点卡红点只报确定的漂移，避免每个项目都常亮。
+
+**验证**：后端 45 个测试全通过（新增 `consistency-auto.test.ts` 覆盖落库与时间戳）；前端 `tsc` 0 错误、`vite build` 通过。project-23 以 `target_stage=render_shot_images` 续跑，日志出现 `自动一致性检查完成 project=23 ok=2 review=4 drift=0`，6 个镜头的 `consistency_result` 全部落库，接口 `/projects/23/shots` 正常返回；临时把一个镜头改成 drift 后截图确认「角色设定」「镜头画面」节点卡红点出现，随后已恢复原值。

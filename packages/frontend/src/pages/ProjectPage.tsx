@@ -33,6 +33,7 @@ import { BRAND } from "@/lib/brand";
 import type { ProjectRevisionPayload } from "@/types";
 import {
   buildMaterialStages,
+  consistencyAlert,
   getOutlineActs,
   getOutlineLogline,
   isFinalVideoUrl,
@@ -307,6 +308,7 @@ function CanvasArea({
   const outlineRecord = storyOutline as unknown as Record<string, unknown> | null;
   const hasOutline = !!outlineRecord && Object.keys(outlineRecord).length > 0;
   const sortedShots = [...shots].sort((a, b) => a.order - b.order);
+  const consistency = consistencyAlert(sortedShots);
   const hasCharacterImages = characters.length > 0 && characters.every((c) => !!c.image_url);
   const characterImageCount = characters.filter((c) => !!c.image_url).length;
   const hasPartialCharacters = characters.length > 0 && characterImageCount < characters.length;
@@ -350,6 +352,7 @@ function CanvasArea({
               ? hasMaterialFailure && !isGenerating ? "error" : "active"
               : hasOutline && outlineApproved && isGenerating ? "active" : "pending",
       metric: characters.length ? `${characterImageCount}/${characters.length} 图` : "待生成",
+      alert: consistency,
     },
     {
       id: "shots",
@@ -374,6 +377,7 @@ function CanvasArea({
               ? "active"
               : "pending",
       metric: `${playableVideoCount}/${shots.length || 0} 视频`,
+      alert: consistency,
     },
     {
       id: "output",
@@ -524,6 +528,13 @@ const WorkflowNodeCard = forwardRef<HTMLButtonElement, {
       <div className="mt-3">
         <div className="flex items-center gap-2">
           <p className="text-[13px] font-medium text-ink-1">{node.label}</p>
+          {node.alert && node.alert.drift > 0 && (
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-error"
+              title={`${node.alert.drift} 个镜头长相漂移，${node.alert.review} 个待确认`}
+              aria-label={`${node.alert.drift} 个镜头角色一致性告警`}
+            />
+          )}
           <WorkflowStatusBadge status={node.status} />
         </div>
         <p className="mt-1 text-[11.5px] leading-6 text-ink-3 line-clamp-2">{node.description}</p>

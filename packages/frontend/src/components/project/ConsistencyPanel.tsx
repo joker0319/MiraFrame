@@ -23,7 +23,7 @@ const STATUS_LABEL: Record<ConsistencyExpectedStatus, string> = {
 
 /**
  * 角色一致性面板：拿角色参考图的人脸特征，比每个镜头里的人脸。
- * 数据由后端按需计算，不落库，所以这里只有「检查」没有「历史」。
+ * 镜头图生成完后端会自动跑一次并写回 shot；这里点「重新检查」才会重新推理。
  */
 export function ConsistencyPanel({ projectId }: { projectId: number }) {
   const [report, setReport] = useState<ConsistencyReportRead | null>(null);

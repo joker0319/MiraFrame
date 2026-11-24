@@ -15,6 +15,13 @@
       "when": 1792049465025,
       "tag": "0001_serious_trauma",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795501918470,
+      "tag": "0002_tired_boomer",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,7 @@ import Redis from "ioredis";
 import { REDIS_CLIENT, REDIS_SUBSCRIBER } from "../redis";
 import { DRIZZLE, type Db } from "../db";
 import { WsGateway } from "../ws";
-import { ImageService, TextService, VideoService } from "../services";
+import { ImageService, TextService, VideoService, ConsistencyService } from "../services";
 import { buildPhase2Graph, setNodeContext, clearNodeContext, runWithNodeContext } from "@miraframe/agent";
 import type { LlmChatMessage, ToolDefinition } from "@miraframe/agent";
 import { MemorySaver, Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
@@ -26,6 +26,7 @@ export class AgentProcessor extends WorkerHost {
 	    @Inject(TextService) private readonly textService: TextService,
 	    @Inject(ImageService) private readonly imageService: ImageService,
 	    @Inject(VideoService) private readonly videoService: VideoService,
+	    @Inject(ConsistencyService) private readonly consistencyService: ConsistencyService,
 	  ) {
     super();
   }
@@ -310,6 +311,7 @@ export class AgentProcessor extends WorkerHost {
           .orderBy(asc(schema.characters.id));
 
         const failures: string[] = [];
+        let referencesChanged = false;
         for (const character of characters) {
           if (character.imageUrl) continue;
           const prompt = [
@@ -333,6 +335,7 @@ export class AgentProcessor extends WorkerHost {
               .returning();
 
             if (updated) {
+              referencesChanged = true;
               this.wsGateway.sendToProject(projectId, "character_updated", {
                 character: toCharacterPayload(updated),
               });
@@ -346,6 +349,13 @@ export class AgentProcessor extends WorkerHost {
               stage: "plan_characters",
             });
           }
+        }
+        if (referencesChanged) {
+          // 参考图换了，之前基于旧参考图算出的镜头结论全部作废
+          await this.db
+            .update(schema.shots)
+            .set({ consistencyResult: null })
+            .where(eq(schema.shots.projectId, projectId));
         }
         if (failures.length > 0) {
           throw new Error(`角色照片生成失败：${failures.join("、")}。请稍后重试，已成功的角色照片会保留。`);
@@ -471,8 +481,9 @@ export class AgentProcessor extends WorkerHost {
 	              .set({
 	                imagePrompt,
 	                imageUrl,
-	                updatedAt: new Date(),
-	              })
+                consistencyResult: null,
+                updatedAt: new Date(),
+              })
 	              .where(eq(schema.shots.id, shot.id))
 	              .returning();
 
@@ -484,10 +495,14 @@ export class AgentProcessor extends WorkerHost {
 	            failures.push(shot.order);
 	          }
 	        }
-	        if (failures.length > 0) {
-	          throw new Error(`分镜帧生成失败：镜头 ${failures.join("、")}。请稍后重试，已成功的分镜帧会保留。`);
-	        }
-	      },
+        if (failures.length > 0) {
+          throw new Error(`分镜帧生成失败：镜头 ${failures.join("、")}。请稍后重试，已成功的分镜帧会保留。`);
+        }
+
+        // 镜头图刚刚定稿，立刻基于当前参考图跑一次一致性校验。
+        // 这段不能抛错：人脸服务未就绪或图片下载失败都不该拖垮生成流水线。
+        await this.autoCheckConsistency(projectId);
+      },
 
 	      generateShotVideos: async () => {
 	        console.log(`[processor] Generating shot videos for project ${projectId}`);
@@ -731,6 +746,61 @@ export class AgentProcessor extends WorkerHost {
     }
   }
 
+  /**
+   * 镜头图生成完就自动校验角色长相，并把结论写回每个 shot。
+   * 这是增强而不是关卡：人脸模型没准备好、图片下载失败都不能让生成任务失败。
+   */
+  private async autoCheckConsistency(projectId: number): Promise<void> {
+    try {
+      const [characters, shots] = await Promise.all([
+        this.db
+          .select()
+          .from(schema.characters)
+          .where(eq(schema.characters.projectId, projectId))
+          .orderBy(asc(schema.characters.id)),
+        this.db
+          .select()
+          .from(schema.shots)
+          .where(eq(schema.shots.projectId, projectId))
+          .orderBy(asc(schema.shots.order)),
+      ]);
+      if (characters.length === 0 || shots.length === 0) return;
+
+      const run = await this.consistencyService.analyzeAndStore({
+        projectId,
+        characters: characters.map((c) => ({
+          id: c.id,
+          name: c.name,
+          imageUrl: c.imageUrl,
+          referenceImages: c.referenceImages,
+        })),
+        shots: shots.map((s) => ({
+          id: s.id,
+          order: s.order,
+          imageUrl: s.imageUrl,
+          characterIds: s.characterIds,
+        })),
+      });
+
+      this.wsGateway.sendToProject(projectId, "consistency_eval_completed", {
+        project_id: projectId,
+        source: "auto",
+        checked_at: run.checkedAt,
+        summary: run.report.summary,
+        shots: run.stored.map((item) => ({
+          shot_id: item.shotId,
+          consistency_result: item.consistencyResult,
+        })),
+      });
+      console.log(
+        `[processor] 自动一致性检查完成 project=${projectId} ` +
+          `ok=${run.report.summary.ok} review=${run.report.summary.review} drift=${run.report.summary.drift} unverifiable=${run.report.summary.unverifiable}`,
+      );
+    } catch (error) {
+      console.warn(`[processor] 自动一致性检查跳过 project=${projectId}:`, error);
+    }
+  }
+
   private waitForConfirm(projectId: number, runId: number, timeoutMs: number): Promise<boolean> {
     return new Promise((resolve) => {
       const channel = `generation:${projectId}:${runId}`;
@@ -828,6 +898,7 @@ function toShotPayload(record: ShotRecord) {
     duration: record.duration,
     prompt: record.prompt,
     image_prompt: record.imagePrompt,
+    consistency_result: record.consistencyResult,
     approval_state: "draft",
     approval_version: record.approvalVersion || 0,
   };

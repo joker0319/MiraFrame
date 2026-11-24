@@ -8,7 +8,7 @@ import { useShotStore } from "@/stores/shotStore";
 import { useMessageStore } from "@/stores/messageStore";
 import { useProjectStore } from "@/stores/projectStore";
 import { resolveEventStage } from "@/utils/workflowStage";
-import type { AgentMessage, WorkflowStage } from "@/types";
+import type { AgentMessage, ShotConsistencyResult, WorkflowStage } from "@/types";
 
 // ---- Module-level state (shared across hook instances) ----
 const globalSockets = new Map<number, Socket>();
@@ -281,9 +281,21 @@ function applyEvent(eventName: string, data: Record<string, unknown>) {
       stores.message.addMessage({ id: generateMessageId(), agent: "system", role: "info", content: "角色圣经已更新" });
       break;
 
-    case "consistency_eval_completed":
-      stores.message.addMessage({ id: generateMessageId(), agent: "system", role: "info", content: `一致性评估完成: 总分 ${data.overall_score}, ${data.character_count} 个角色` });
+    case "consistency_eval_completed": {
+      const results = (data.shots || []) as Array<{
+        shot_id: number;
+        consistency_result: ShotConsistencyResult;
+      }>;
+      for (const item of results) {
+        stores.shot.setShotConsistency(item.shot_id, item.consistency_result);
+      }
+      const summary = data.summary as { drift?: number; review?: number } | undefined;
+      const content = summary
+        ? `角色一致性检查完成：${summary.drift || 0} 个镜头疑似漂移，${summary.review || 0} 个待确认。`
+        : "角色一致性检查完成";
+      stores.message.addMessage({ id: generateMessageId(), agent: "system", role: "info", content });
       break;
+    }
   }
 }
 

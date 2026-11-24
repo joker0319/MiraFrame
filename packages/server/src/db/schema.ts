@@ -12,6 +12,7 @@ import {
   primaryKey,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+import type { StoredShotConsistency } from "../services/consistency";
 
 // ── Project ──
 export const projects = pgTable("project", {
@@ -92,6 +93,8 @@ export const shots = pgTable(
     sfx: varchar("sfx"),
     ttsUrl: text("tts_url"),
     bgmType: varchar("bgm_type"),
+    /** 镜头图生成后自动跑的角色一致性快照；换图/换角色参考图时清空 */
+    consistencyResult: jsonb("consistency_result").$type<StoredShotConsistency>(),
     seed: integer("seed"),
     characterIds: jsonb("character_ids").$type<number[]>().notNull().default([]),
     approvedDescription: text("approved_description"),

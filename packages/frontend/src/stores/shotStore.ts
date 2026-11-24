@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Shot } from "@/types";
+import type { Shot, ShotConsistencyResult } from "@/types";
 
 interface ShotState {
   shots: Shot[];
@@ -10,6 +10,8 @@ interface ShotState {
   addShot: (shot: Shot) => void;
   /** Upsert: update if exists (by id), otherwise append */
   updateShot: (shot: Shot) => void;
+  /** WebSocket 收到自动一致性结果时局部更新，不覆盖其他镜头字段 */
+  setShotConsistency: (shotId: number, result: ShotConsistencyResult | null) => void;
   removeShot: (shotId: number) => void;
   clearShots: () => void;
   setSelectedShot: (id: number | null) => void;
@@ -39,6 +41,13 @@ export const useShotStore = create<ShotState>((set) => ({
       }
       return { shots: [...state.shots, shot].sort((a, b) => a.order - b.order) };
     }),
+
+  setShotConsistency: (shotId, result) =>
+    set((state) => ({
+      shots: state.shots.map((shot) =>
+        shot.id === shotId ? { ...shot, consistency_result: result } : shot,
+      ),
+    })),
 
   removeShot: (shotId) =>
     set((state) => ({

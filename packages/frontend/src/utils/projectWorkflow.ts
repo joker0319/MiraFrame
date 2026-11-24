@@ -3,6 +3,11 @@ import type { Character, RevisionEntityType, RevisionFeedbackType, Shot, Workflo
 
 export type WorkflowStatus = "pending" | "active" | "review" | "done" | "error";
 
+export interface ConsistencyAlert {
+  drift: number;
+  review: number;
+}
+
 export interface WorkflowNode {
   id: string;
   label: string;
@@ -10,6 +15,20 @@ export interface WorkflowNode {
   icon: ComponentType<{ className?: string }>;
   status: WorkflowStatus;
   metric: string;
+  /** 自动一致性校验发现的异常镜头数；只在角色/画面节点上出现 */
+  alert?: ConsistencyAlert;
+}
+
+/** 镜头图生成后后端已把结论写回 shot，这里只读快照，不重新跑人脸模型。 */
+export function consistencyAlert(shots: Shot[]): ConsistencyAlert {
+  let drift = 0;
+  let review = 0;
+  for (const shot of shots) {
+    const verdict = shot.consistency_result?.verdict;
+    if (verdict === "drift") drift++;
+    else if (verdict === "review") review++;
+  }
+  return { drift, review };
 }
 
 export function buildMaterialStages({

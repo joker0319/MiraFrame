@@ -1,0 +1,1 @@
+ALTER TABLE "shot" ADD COLUMN "consistency_result" jsonb;

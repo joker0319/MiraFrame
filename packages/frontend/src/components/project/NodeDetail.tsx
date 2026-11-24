@@ -187,7 +187,7 @@ export function NodeDetail({
               url: playableOrPreviewUrl(s),
               posterUrl: s.image_url || null,
               kind: isPlayableVideoUrl(s.video_url) ? "video" : "image",
-              issue: videoIssue(s),
+              issue: videoIssue(s) ?? (s.consistency_result?.verdict === "drift" ? "角色长相漂移" : null),
               actionLabel: "重生成视频",
               onAction: () => onSubmitRevision({
                 content: `重新生成镜头 ${s.order} 的视频，保留分镜含义，但优化动作节奏和画面连续性。`,

@@ -169,7 +169,8 @@ export class ProjectsController {
     if (characters.length === 0) throw new NotFoundException("该项目还没有角色");
     if (shots.length === 0) throw new NotFoundException("该项目还没有分镜");
 
-    const report = await this.consistencyService.analyze({
+    const run = await this.consistencyService.analyzeAndStore({
+      projectId,
       characters: characters.map((c) => ({
         id: c.id,
         name: c.name,
@@ -183,7 +184,7 @@ export class ProjectsController {
         characterIds: s.characterIds,
       })),
     });
-    return { ...report, projectId };
+    return { ...run.report, projectId, checkedAt: run.checkedAt };
   }
 
   // ---- Messages ----

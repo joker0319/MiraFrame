@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { eq } from "drizzle-orm";
+import { DRIZZLE, schema, type Db } from "../db";
 import { FaceService, type DetectedFace } from "./face.service";
 import {
   DEFAULT_THRESHOLDS,
@@ -11,8 +13,10 @@ import {
   summarize,
   type CharacterReference,
   type ConsistencyReport,
+  type ConsistencyRun,
   type ConsistencyThresholds,
   type ShotInput,
+  type StoredShotConsistency,
 } from "./consistency";
 
 export interface ConsistencyInput {
@@ -36,9 +40,13 @@ const downloadCache = new Map<string, string>();
 
 @Injectable()
 export class ConsistencyService {
+  /** face-api 的 wasm 后端不是并发安全的：同一时刻只允许一次分析 */
+  private analysisQueue: Promise<void> = Promise.resolve();
+
   constructor(
     @Inject(FaceService) private readonly face: FaceService,
     @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(DRIZZLE) private readonly db: Db,
   ) {}
 
   getThresholds(): ConsistencyThresholds {
@@ -51,8 +59,36 @@ export class ConsistencyService {
     };
   }
 
-  async analyze(input: ConsistencyInput): Promise<ConsistencyReport> {
-    const started = Date.now();
+  /**
+   * 串行执行人脸推理。多个生成 worker 同时在跑时，wasm 后端并发调用会互相踩内存，
+   * 所以这里排队而不是让每个镜头图各起一个 Promise。
+   */
+  analyze(input: ConsistencyInput): Promise<ConsistencyReport> {
+    const run = this.analysisQueue.then(() => this.analyzeNow(input));
+    this.analysisQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** 分析并把每个镜头的结论写回 shot，供节点卡/详情在生成过程中直接读。 */
+  async analyzeAndStore(input: ConsistencyInput & { projectId: number }): Promise<ConsistencyRun> {
+    const report = await this.analyze(input);
+    const checkedAt = new Date().toISOString();
+    const stored = report.shots.map((shot) => ({
+      shotId: shot.shotId,
+      consistencyResult: { ...shot, checkedAt } satisfies StoredShotConsistency,
+    }));
+
+    for (const item of stored) {
+      await this.db
+        .update(schema.shots)
+        .set({ consistencyResult: item.consistencyResult })
+        .where(eq(schema.shots.id, item.shotId));
+    }
+
+    return { report, checkedAt, stored };
+  }
+
+  private async analyzeNow(input: ConsistencyInput): Promise<ConsistencyReport> {
     if (!this.face.isReady()) {
       throw new Error(`人脸模型未就绪：${this.face.getError() || "未知原因"}`);
     }

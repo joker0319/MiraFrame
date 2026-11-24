@@ -187,6 +187,7 @@ type ServerShot = Shot & {
   videoUrl?: Shot["video_url"];
   imagePrompt?: Shot["image_prompt"];
   motionNote?: Shot["motion_note"];
+  consistencyResult?: Shot["consistency_result"];
 };
 
 type ServerAgentRun = AgentRun & {
@@ -255,6 +256,7 @@ function normalizeShot(shot: Shot | ServerShot): Shot {
     video_url: s.video_url ?? s.videoUrl ?? null,
     image_prompt: s.image_prompt ?? s.imagePrompt ?? undefined,
     motion_note: s.motion_note ?? s.motionNote ?? undefined,
+    consistency_result: s.consistency_result ?? s.consistencyResult ?? null,
   };
 }
 

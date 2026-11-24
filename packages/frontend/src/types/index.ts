@@ -19,6 +19,17 @@ export type WorkflowStage =
   | "review";
 export type ConfigValue = string | number | boolean | null;
 
+/** 后端自动校验写入 shot 的快照，字段沿用接口约定（camelCase）。 */
+export interface ShotConsistencyResult {
+  shotId: number;
+  order: number;
+  expected: ConsistencyExpectedRead[];
+  extraFaces: ConsistencyExtraFaceRead[];
+  verdict: ConsistencyShotVerdict;
+  message: string;
+  checkedAt: string;
+}
+
 export type WsEventType =
   | "connected"
   | "pong"
@@ -260,6 +271,8 @@ export interface Shot {
   sfx?: string;
   tts_url?: string | null;
   bgm_type?: string;
+  /** 镜头图生成后自动跑的一致性快照；换图或换参考图时会被后端清空 */
+  consistency_result?: ShotConsistencyResult | null;
   seed?: number;
   character_ids?: number[];
   approval_state?: ReviewState;
@@ -536,8 +549,13 @@ export interface AgentThinkingEventData {
 
 export interface ConsistencyEvalCompletedEventData {
   project_id: number;
-  overall_score: number;
-  character_count: number;
+  source?: "auto" | "manual";
+  checked_at?: string;
+  summary?: { ok: number; review: number; drift: number; unverifiable: number };
+  shots?: Array<{ shot_id: number; consistency_result: ShotConsistencyResult }>;
+  /** 旧版字段，服务端已不再发送 */
+  overall_score?: number;
+  character_count?: number;
 }
 
 // --- Messages ---
@@ -627,7 +645,7 @@ export interface StyleTemplateUpdatePayload {
 }
 
 // --- Consistency Evaluation ---
-// 后端按需计算，不落库：每次请求都基于当前的角色参考图与镜头图重新比对。
+// 镜头图生成完会自动校验并把每个镜头的结论写回 shot；面板手动刷新也是同一份计算。
 export type ConsistencyExpectedStatus = "consistent" | "review" | "drift" | "missing" | "no_reference";
 export type ConsistencyShotVerdict = "ok" | "review" | "drift" | "unverifiable";
 
@@ -666,6 +684,7 @@ export interface ConsistencyShotRead {
 
 export interface ConsistencyReportRead {
   projectId: number;
+  checkedAt?: string;
   thresholds: { ok: number; drift: number; matchLimit: number };
   characters: ConsistencyCharacterRefRead[];
   shots: ConsistencyShotRead[];

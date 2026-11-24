@@ -78,7 +78,7 @@ export class RevisionService {
       if (analysis.affected.length > 0) {
         await this.db
           .update(schema.shots)
-          .set({ imageUrl: null, videoUrl: null, updatedAt: new Date() })
+          .set({ imageUrl: null, videoUrl: null, consistencyResult: null, updatedAt: new Date() })
           .where(inArray(schema.shots.id, analysis.affected));
       }
       return impact;
@@ -140,7 +140,7 @@ export class RevisionService {
       const nextImagePrompt = [imagePrompt, `用户画面反馈：${input.content}`].filter(Boolean).join("\n");
       await this.db
         .update(schema.shots)
-        .set({ imagePrompt: nextImagePrompt, imageUrl: null, videoUrl: null, updatedAt: new Date() })
+        .set({ imagePrompt: nextImagePrompt, imageUrl: null, videoUrl: null, consistencyResult: null, updatedAt: new Date() })
         .where(eq(schema.shots.id, shotId));
     }
   }

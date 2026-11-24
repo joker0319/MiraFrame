@@ -88,6 +88,15 @@ export interface ConsistencyReport {
   summary: { ok: number; review: number; drift: number; unverifiable: number };
 }
 
+/** 自动校验后写到 shot 上的快照，带着检查时间便于判断新旧。 */
+export type StoredShotConsistency = ShotResult & { checkedAt: string };
+
+export interface ConsistencyRun {
+  report: ConsistencyReport;
+  checkedAt: string;
+  stored: Array<{ shotId: number; consistencyResult: StoredShotConsistency }>;
+}
+
 export function euclideanDistance(a: number[], b: number[]): number {
   if (a.length !== b.length) return Number.POSITIVE_INFINITY;
   let sum = 0;
