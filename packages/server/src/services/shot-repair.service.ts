@@ -52,16 +52,7 @@ export class ShotRepairService {
             .where(eq(schema.shotCharacterBindings.shotId, shotId))
         ).map((row) => row.characterId);
 
-    const labels: string[] = [];
-    const references: string[] = [];
-    for (const character of characters.filter((c) => boundIds.includes(c.id))) {
-      const urls = dedupe([character.imageUrl, ...(character.referenceImages || [])]).slice(0, 3);
-      for (const url of urls) {
-        if (labels.length >= 4) break;
-        labels.push(character.name);
-        references.push(url);
-      }
-    }
+    const { labels, references } = collectRepairReferences(boundIds, characters);
     if (references.length === 0) {
       throw new BadRequestException("这个镜头绑定的角色还没有可用参考图，请先到角色设定补充角色图");
     }
@@ -71,6 +62,12 @@ export class ShotRepairService {
       size: "1024x1024",
       referenceImages: references,
     });
+
+    // 没有配图像 key 时 generateImage 会静默返回占位图：这里必须在写库前拦住，
+    // 否则「修复」会把一张真图换成灰底占位图，还顺手清掉已经生成好的视频。
+    if (imageUrl.startsWith("data:")) {
+      throw new BadRequestException("图像服务未配置（返回了占位图），已跳过按参考图重画");
+    }
 
     const before = shot.consistencyResult ?? null;
     await this.db
@@ -100,6 +97,43 @@ export class ShotRepairService {
 
 function dedupe(list: Array<string | null | undefined>): string[] {
   return [...new Set(list.filter((value): value is string => Boolean(value)))];
+}
+
+export interface RepairReferenceCharacter {
+  id: number;
+  name: string;
+  imageUrl: string | null;
+  referenceImages?: string[] | null;
+}
+
+/** 每个角色最多 3 张、整镜最多 4 张：再多只会稀释提示词，也压不住模型注意力。 */
+export const MAX_REFERENCES_PER_SHOT = 4;
+export const MAX_REFERENCES_PER_CHARACTER = 3;
+
+/**
+ * 把「镜头绑定角色」换算成「能喂给图生图的参考图 + 每张图属于谁」。
+ *
+ * 手动修正和自动修正都走这一份实现 —— 两边各写一遍，迟早会出现
+ * 「自动修复用 4 张、手动修复用 3 张」这种只有对着日志才能发现的差异。
+ */
+export function collectRepairReferences(
+  boundIds: number[],
+  characters: RepairReferenceCharacter[],
+): { labels: string[]; references: string[] } {
+  const labels: string[] = [];
+  const references: string[] = [];
+  for (const character of characters.filter((item) => boundIds.includes(item.id))) {
+    const urls = dedupe([character.imageUrl, ...(character.referenceImages || [])]).slice(
+      0,
+      MAX_REFERENCES_PER_CHARACTER,
+    );
+    for (const url of urls) {
+      if (references.length >= MAX_REFERENCES_PER_SHOT) break;
+      labels.push(character.name);
+      references.push(url);
+    }
+  }
+  return { labels, references };
 }
 
 /** labels[i] 说明第 i+1 张参考图属于哪个角色，提示词里显式告诉模型要保脸。 */

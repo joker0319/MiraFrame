@@ -315,6 +315,29 @@ function applyEvent(eventName: string, data: Record<string, unknown>) {
       stores.message.addMessage({ id: generateMessageId(), agent: "system", role: "info", content });
       break;
     }
+
+    case "consistency_repair_completed": {
+      const repaired = (data.repaired || []) as Array<{
+        order: number | null;
+        references: number;
+        resolved: boolean;
+      }>;
+      const failed = (data.failed || []) as Array<{ shot_id: number; error: string }>;
+      if (repaired.length === 0 && failed.length === 0) break;
+
+      const resolved = repaired.filter((item) => item.resolved).length;
+      const unresolved = repaired.length - resolved;
+      const lines = [`角色一致性自动修复：已按参考图重画 ${repaired.length} 个镜头，${resolved} 个已恢复`];
+      if (unresolved > 0) lines.push(`${unresolved} 个仍疑似漂移，可在一致性面板手动重试`);
+      if (failed.length > 0) lines.push(`${failed.length} 个修复失败，原图已保留`);
+      stores.message.addMessage({
+        id: generateMessageId(),
+        agent: "system",
+        role: "info",
+        content: lines.join("；"),
+      });
+      break;
+    }
   }
 }
 
@@ -397,7 +420,7 @@ export function useWebSocket(projectId: number | null) {
       "shot_created", "shot_updated", "shot_deleted",
       "outline_updated", "project_updated", "data_cleared",
       "critique_result", "bible_updated", "version_created", "version_rollback",
-      "audio_generated", "export_completed", "consistency_eval_completed",
+      "audio_generated", "export_completed", "consistency_eval_completed", "consistency_repair_completed",
     ];
 
     for (const eventName of eventNames) {

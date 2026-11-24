@@ -33,6 +33,7 @@ export const WsEventType = z.enum([
   "audio_generated",
   "export_completed",
   "consistency_eval_completed",
+  "consistency_repair_completed",
 ]);
 export type WsEventType = z.infer<typeof WsEventType>;
 
@@ -201,7 +202,39 @@ export const ConsistencyEvalCompletedEventDataSchema = z.object({
   overallScore: z.number().min(0).max(100),
   characterCount: z.number(),
 });
-export type ConsistencyEvalCompletedEventData = z.infer<typeof ConsistencyEvalCompletedEventDataSchema>;
+export type ConsistencyEvalCompletedEventData = z.infer<
+  typeof ConsistencyEvalCompletedEventDataSchema
+>;
+
+/**
+ * 自动修复回执。线上一律 snake_case —— 与 consistency_eval_completed 的实际载荷保持一致，
+ * 不要写成 camelCase，否则前端拿到的是 undefined。
+ */
+export const ConsistencyRepairCompletedEventDataSchema = z.object({
+  project_id: z.number().int(),
+  source: z.literal("auto"),
+  repaired: z.array(
+    z.object({
+      shot_id: z.number().int(),
+      order: z.number().int().nullable(),
+      references: z.number().int(),
+      /** 复检结论；复检失败时为 null */
+      verdict: z.string().nullable(),
+      /** 复检不再是漂移；unverifiable 不算修好 */
+      resolved: z.boolean(),
+    }),
+  ),
+  skipped: z.array(
+    z.object({
+      shot_id: z.number().int(),
+      reason: z.enum(["not_drift", "no_references", "over_budget"]),
+    }),
+  ),
+  failed: z.array(z.object({ shot_id: z.number().int(), error: z.string() })),
+});
+export type ConsistencyRepairCompletedEventData = z.infer<
+  typeof ConsistencyRepairCompletedEventDataSchema
+>;
 
 export const OutlineUpdatedEventDataSchema = z.object({
   projectId: z.string().uuid(),

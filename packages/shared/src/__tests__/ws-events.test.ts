@@ -17,6 +17,7 @@ import {
   AudioGeneratedEventDataSchema,
   ExportCompletedEventDataSchema,
   ConsistencyEvalCompletedEventDataSchema,
+  ConsistencyRepairCompletedEventDataSchema,
   OutlineUpdatedEventDataSchema,
   BibleUpdatedEventDataSchema,
   CharacterCreatedEventDataSchema,
@@ -40,8 +41,8 @@ describe("WsEventSchema", () => {
 });
 
 describe("WsEventType", () => {
-  it("includes all 29 event types", () => {
-    expect(WsEventType.options.length).toBe(29);
+  it("includes all 30 event types", () => {
+    expect(WsEventType.options.length).toBe(30);
   });
 });
 
@@ -379,5 +380,43 @@ describe("Shot event schemas", () => {
         shotId: "550e8400-e29b-41d4-a716-446655440002",
       }).success
     ).toBe(true);
+  });
+});
+
+describe("ConsistencyRepairCompletedEventDataSchema", () => {
+  const payload = {
+    project_id: 7,
+    source: "auto",
+    repaired: [{ shot_id: 11, order: 1, references: 2, verdict: "ok", resolved: true }],
+    skipped: [{ shot_id: 12, reason: "over_budget" }],
+    failed: [{ shot_id: 13, error: "角色还没有参考图" }],
+  };
+
+  it("接受服务端实际下发的 snake_case 载荷", () => {
+    expect(ConsistencyRepairCompletedEventDataSchema.safeParse(payload).success).toBe(true);
+  });
+
+  it("verdict 允许 null：复检本身失败时也要能回执", () => {
+    const result = ConsistencyRepairCompletedEventDataSchema.safeParse({
+      ...payload,
+      repaired: [{ shot_id: 11, order: null, references: 1, verdict: null, resolved: false }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("拒绝 camelCase：前端拿 undefined 的坑不能再踩一次", () => {
+    const { project_id, ...rest } = payload;
+    expect(
+      ConsistencyRepairCompletedEventDataSchema.safeParse({ ...rest, projectId: project_id }).success,
+    ).toBe(false);
+  });
+
+  it("拒绝未知的跳过原因", () => {
+    expect(
+      ConsistencyRepairCompletedEventDataSchema.safeParse({
+        ...payload,
+        skipped: [{ shot_id: 12, reason: "too_ugly" }],
+      }).success,
+    ).toBe(false);
   });
 });

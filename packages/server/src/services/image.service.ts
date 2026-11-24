@@ -12,6 +12,31 @@ import {
   type ProviderHealthSnapshot,
 } from "./provider-routing";
 
+/**
+ * IMAGE_* 读不到时回落到 app.image*：运行时设置面板写的是后者，
+ * 而多 provider 链只认前者，这里做一层统一。
+ * 导出是为了让「自动修复能不能出图」的判断和真正出图用同一份配置解析。
+ */
+export function createImageEnvReader(config: ConfigService): ProviderEnvReader {
+  const appFallbacks: Record<string, string> = {
+    IMAGE_PROVIDER: "app.imageProvider",
+    IMAGE_BASE_URL: "app.imageBaseUrl",
+    IMAGE_API_KEY: "app.imageApiKey",
+    IMAGE_MODEL: "app.imageModel",
+    IMAGE_ENDPOINT: "app.imageEndpoint",
+  };
+  return (key: string) => {
+    const direct = config.get<string>(key);
+    if (typeof direct === "string" && direct.trim()) return direct;
+    const appKey = appFallbacks[key];
+    if (appKey) {
+      const value = config.get<string>(appKey);
+      if (typeof value === "string" && value.trim()) return value;
+    }
+    return undefined;
+  };
+}
+
 @Injectable()
 export class ImageService {
   /** 熔断状态要跨请求累计，链被改写时原地同步。 */
@@ -21,23 +46,7 @@ export class ImageService {
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
 
   private envReader(): ProviderEnvReader {
-    const appFallbacks: Record<string, string> = {
-      IMAGE_PROVIDER: "app.imageProvider",
-      IMAGE_BASE_URL: "app.imageBaseUrl",
-      IMAGE_API_KEY: "app.imageApiKey",
-      IMAGE_MODEL: "app.imageModel",
-      IMAGE_ENDPOINT: "app.imageEndpoint",
-    };
-    return (key: string) => {
-      const direct = this.config.get<string>(key);
-      if (typeof direct === "string" && direct.trim()) return direct;
-      const appKey = appFallbacks[key];
-      if (appKey) {
-        const value = this.config.get<string>(appKey);
-        if (typeof value === "string" && value.trim()) return value;
-      }
-      return undefined;
-    };
+    return createImageEnvReader(this.config);
   }
 
   private getRouter(): ProviderRouter {
@@ -76,7 +85,9 @@ export class ImageService {
 
       if (candidate.provider === "fake") {
         router.recordSuccess(candidate.name, 0);
-        return this.config.get<string>("app.fakeImageFixtureUrl") || placeholderDataUrl("Image fixture");
+        return (
+          this.config.get<string>("app.fakeImageFixtureUrl") || placeholderDataUrl("Image fixture")
+        );
       }
 
       const startedAt = Date.now();
@@ -86,7 +97,10 @@ export class ImageService {
         if (index > 0) {
           console.warn(
             `[ImageService] 已降级到 ${candidate.name}（前序 ` +
-              `${plan.slice(0, index).map((item) => item.candidate.name).join("、")} 未成功）`,
+              `${plan
+                .slice(0, index)
+                .map((item) => item.candidate.name)
+                .join("、")} 未成功）`,
           );
         }
         return url;
@@ -94,7 +108,9 @@ export class ImageService {
         const failure = classifyProviderFailure(error);
         const message = error instanceof Error ? error.message : String(error);
         if (!failure.switchable) {
-          console.error(`[ImageService] ${candidate.name} 拒绝请求（${failure.kind}），不切换：${message}`);
+          console.error(
+            `[ImageService] ${candidate.name} 拒绝请求（${failure.kind}），不切换：${message}`,
+          );
           throw error;
         }
         router.recordFailure(candidate.name, error);
@@ -120,7 +136,8 @@ export class ImageService {
     options?: { size?: string; referenceImages?: string[] },
   ): Promise<string> {
     const isDashScope =
-      candidate.baseUrl.includes("dashscope") || candidate.endpoint.includes("multimodal-generation");
+      candidate.baseUrl.includes("dashscope") ||
+      candidate.endpoint.includes("multimodal-generation");
 
     const references = (options?.referenceImages || []).filter(Boolean).slice(0, 4);
     const requestBody = JSON.stringify(
@@ -144,7 +161,9 @@ export class ImageService {
         : buildAgnesImageBody(candidate.model, prompt, options?.size || "1024x1024", references),
     );
 
-    console.log(`[ImageService] 出图(${candidate.name}) → POST ${candidate.baseUrl}${candidate.endpoint}`);
+    console.log(
+      `[ImageService] 出图(${candidate.name}) → POST ${candidate.baseUrl}${candidate.endpoint}`,
+    );
 
     const response = await postWithRateLimitRetry(`${candidate.baseUrl}${candidate.endpoint}`, {
       headers: {
@@ -164,7 +183,8 @@ export class ImageService {
     let url = extractMediaUrl(json);
     if (!url) {
       const taskId = extractTaskId(json);
-      if (taskId) url = await this.pollDashScopeTask(candidate.baseUrl, candidate.apiKey, taskId, 180_000);
+      if (taskId)
+        url = await this.pollDashScopeTask(candidate.baseUrl, candidate.apiKey, taskId, 180_000);
     }
     if (!url) {
       throw new Error(`Image API returned no URL: ${JSON.stringify(json).substring(0, 300)}`);
@@ -172,7 +192,12 @@ export class ImageService {
     return url;
   }
 
-  private async pollDashScopeTask(baseUrl: string, apiKey: string, taskId: string, timeoutMs: number): Promise<string | null> {
+  private async pollDashScopeTask(
+    baseUrl: string,
+    apiKey: string,
+    taskId: string,
+    timeoutMs: number,
+  ): Promise<string | null> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       await sleep(5_000);

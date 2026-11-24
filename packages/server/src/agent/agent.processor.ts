@@ -6,7 +6,10 @@ import Redis from "ioredis";
 import { REDIS_CLIENT, REDIS_SUBSCRIBER } from "../redis";
 import { DRIZZLE, type Db } from "../db";
 import { WsGateway } from "../ws";
-import { ImageService, TextService, VideoService, ConsistencyService } from "../services";
+import { ImageService, TextService, VideoService, ConsistencyService, ShotRepairService, createImageEnvReader } from "../services";
+import type { ConsistencyRun } from "../services/consistency";
+import { collectRepairReferences } from "../services/shot-repair.service";
+import { isImageRepairAvailable, planAutoRepair, readAutoRepairConfig, runAutoRepair, worstDistanceOf } from "../services/auto-repair";
 import { buildPhase2Graph, createCheckpointer, runWithNodeContext } from "@miraframe/agent";
 import type { LlmChatMessage, ToolDefinition, CritiqueReport } from "@miraframe/agent";
 import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
@@ -17,6 +20,18 @@ import { buildInitialState, buildProjectContext, buildConversationHistory } from
 import { buildArtifactLineage, matchCharacterIds, type LineageCharacter } from "./lineage";
 import { toCritiqueResultPayload } from "./critique-payload";
 import { ConversationMemoryService } from "./conversation-memory.service";
+
+/** 一致性检查的产物，检测与自动修复共用，避免二次查库。 */
+interface ConsistencySnapshot {
+  run: ConsistencyRun;
+  shots: Array<{ id: number; order: number; imageUrl: string | null; characterIds: number[] | null }>;
+  characters: Array<{
+    id: number;
+    name: string;
+    imageUrl: string | null;
+    referenceImages: string[] | null;
+  }>;
+}
 
 @Processor("generation", { concurrency: 8 })
 @Injectable()
@@ -30,6 +45,7 @@ export class AgentProcessor extends WorkerHost {
 	    @Inject(ImageService) private readonly imageService: ImageService,
 	    @Inject(VideoService) private readonly videoService: VideoService,
 	    @Inject(ConsistencyService) private readonly consistencyService: ConsistencyService,
+	    @Inject(ShotRepairService) private readonly shotRepair: ShotRepairService,
 	    @Inject(ConfigService) private readonly config: ConfigService,
 	    @Inject(ConversationMemoryService) private readonly memoryService: ConversationMemoryService,
 	  ) {
@@ -525,7 +541,13 @@ export class AgentProcessor extends WorkerHost {
 
         // 镜头图刚刚定稿，立刻基于当前参考图跑一次一致性校验。
         // 这段不能抛错：人脸服务未就绪或图片下载失败都不该拖垮生成流水线。
-        await this.autoCheckConsistency(projectId);
+        const consistency = await this.autoCheckConsistency(projectId);
+
+        // 检出漂移后接着自动修：按绑定的角色参考图重画一次，再复检。
+        // 预算、图像服务可用性、单个镜头失败都在方法内兜住，不影响后续视频阶段。
+        if (consistency) {
+          await this.autoRepairDriftedShots(projectId, consistency);
+        }
       },
 
 	      generateShotVideos: async () => {
@@ -770,8 +792,10 @@ export class AgentProcessor extends WorkerHost {
   /**
    * 镜头图生成完就自动校验角色长相，并把结论写回每个 shot。
    * 这是增强而不是关卡：人脸模型没准备好、图片下载失败都不能让生成任务失败。
+   *
+   * 返回这一轮的上下文，交给自动修复复用 —— 再查一遍角色和镜头只是多两次往返。
    */
-  private async autoCheckConsistency(projectId: number): Promise<void> {
+  private async autoCheckConsistency(projectId: number): Promise<ConsistencySnapshot | null> {
     try {
       const [characters, shots] = await Promise.all([
         this.db
@@ -785,7 +809,7 @@ export class AgentProcessor extends WorkerHost {
           .where(eq(schema.shots.projectId, projectId))
           .orderBy(asc(schema.shots.order)),
       ]);
-      if (characters.length === 0 || shots.length === 0) return;
+      if (characters.length === 0 || shots.length === 0) return null;
 
       const run = await this.consistencyService.analyzeAndStore({
         projectId,
@@ -817,9 +841,111 @@ export class AgentProcessor extends WorkerHost {
         `[processor] 自动一致性检查完成 project=${projectId} ` +
           `ok=${run.report.summary.ok} review=${run.report.summary.review} drift=${run.report.summary.drift} unverifiable=${run.report.summary.unverifiable}`,
       );
+
+      return { run, shots, characters };
     } catch (error) {
       console.warn(`[processor] 自动一致性检查跳过 project=${projectId}:`, error);
+      return null;
     }
+  }
+
+  /**
+   * 自动修复漂移镜头：把「检出问题」和「按参考图重画」接成闭环。
+   *
+   * 三道闸按成本从低到高排：配置 → 图像服务是否真能出图 → 这一轮有没有漂移。
+   * 图像服务那一道最重要：fake provider 和缺 key 都会静默返回占位图，
+   * 放过去就会把真图换成灰底占位图，还顺手清掉视频。
+   */
+  private async autoRepairDriftedShots(projectId: number, snapshot: ConsistencySnapshot): Promise<void> {
+    const config = readAutoRepairConfig((key) => this.config.get<string>(key) ?? undefined);
+    if (!config.enabled || config.maxShots <= 0) return;
+
+    if (!isImageRepairAvailable(createImageEnvReader(this.config))) {
+      console.warn(`[processor] 自动修复跳过 project=${projectId}：图像 provider 不可用（fake 或缺 key）`);
+      return;
+    }
+
+    // characterIds 是主路径；只有历史数据才会只剩绑定表，这里合并一次，
+    // 避免自动修复对老项目「看不见参考图」而静默跳过。
+    const bindings = await this.db
+      .select({
+        shotId: schema.shotCharacterBindings.shotId,
+        characterId: schema.shotCharacterBindings.characterId,
+      })
+      .from(schema.shotCharacterBindings)
+      .innerJoin(schema.shots, eq(schema.shots.id, schema.shotCharacterBindings.shotId))
+      .where(eq(schema.shots.projectId, projectId));
+
+    const boundByShot = new Map<number, number[]>();
+    for (const row of bindings) {
+      const list = boundByShot.get(row.shotId) ?? [];
+      list.push(row.characterId);
+      boundByShot.set(row.shotId, list);
+    }
+
+    const byShotId = new Map(snapshot.run.stored.map((item) => [item.shotId, item.consistencyResult]));
+    const orderById = new Map(snapshot.shots.map((shot) => [shot.id, shot.order]));
+    const candidates = snapshot.shots.map((shot) => {
+      const result = byShotId.get(shot.id) ?? null;
+      const boundIds = shot.characterIds?.length ? shot.characterIds : (boundByShot.get(shot.id) ?? []);
+      const { references } = collectRepairReferences(boundIds, snapshot.characters);
+      return {
+        shotId: shot.id,
+        order: shot.order,
+        verdict: result?.verdict ?? ("unverifiable" as const),
+        worstDistance: worstDistanceOf(result),
+        referenceCount: references.length,
+      };
+    });
+
+    const plan = planAutoRepair(candidates, config.maxShots);
+    if (plan.selected.length === 0) {
+      console.log(`[processor] 自动修复：本轮无可用漂移镜头 project=${projectId}`);
+      return;
+    }
+    console.log(
+      `[processor] 自动修复 ${plan.selected.length} 个漂移镜头 project=${projectId}：` +
+        plan.selected.map((item) => `#${item.order}`).join("、"),
+    );
+
+    const outcome = await runAutoRepair({
+      plan,
+      repair: async (shotId) => {
+        const result = await this.shotRepair.repairWithReferences(projectId, shotId);
+        // 修复服务只改库不广播，这里补一条 shot_updated，前端不用刷新就能看到新图
+        const [updated] = await this.db
+          .select()
+          .from(schema.shots)
+          .where(eq(schema.shots.id, shotId))
+          .limit(1);
+        if (updated) {
+          this.wsGateway.sendToProject(projectId, "shot_updated", { shot: toShotPayload(updated) });
+        }
+        return { shotId, references: result.references, after: result.after };
+      },
+      log: (message) => console.log(`[processor:auto-repair] ${message}`),
+    });
+
+    this.wsGateway.sendToProject(projectId, "consistency_repair_completed", {
+      project_id: projectId,
+      source: "auto",
+      repaired: outcome.repaired.map((item) => ({
+        shot_id: item.shotId,
+        order: orderById.get(item.shotId) ?? null,
+        references: item.references,
+        verdict: item.verdict,
+        resolved: item.resolved,
+      })),
+      skipped: outcome.skipped.map((item) => ({ shot_id: item.shotId, reason: item.reason })),
+      failed: outcome.failed.map((item) => ({ shot_id: item.shotId, error: item.error })),
+    });
+
+    const unresolved = outcome.repaired.filter((item) => !item.resolved).length;
+    console.log(
+      `[processor] 自动修复完成 project=${projectId} ` +
+        `repaired=${outcome.repaired.length} unresolved=${unresolved} failed=${outcome.failed.length} ` +
+        `skipped=${outcome.skipped.length}`,
+    );
   }
 
   private waitForConfirm(projectId: number, runId: number, timeoutMs: number): Promise<boolean> {

@@ -59,7 +59,8 @@ export type WsEventType =
   | "version_rollback"
   | "audio_generated"
   | "export_completed"
-  | "consistency_eval_completed";
+  | "consistency_eval_completed"
+  | "consistency_repair_completed";
 
 // --- Agent Name Map ---
 export const AGENT_NAME_MAP: Record<string, string> = {
