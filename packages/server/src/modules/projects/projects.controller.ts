@@ -21,6 +21,7 @@ import { WsGateway } from "../../ws";
 import { eq, desc, asc, inArray } from "drizzle-orm";
 import { AgentService } from "../../agent";
 import { ConsistencyService } from "../../services/consistency.service";
+import { ShotRepairService } from "../../services/shot-repair.service";
 
 // ---- Projects CRUD ----
 
@@ -31,6 +32,7 @@ export class ProjectsController {
     @Inject(WsGateway) private readonly wsGateway: WsGateway,
     @Inject(AgentService) private readonly agentService: AgentService,
     @Inject(ConsistencyService) private readonly consistencyService: ConsistencyService,
+    @Inject(ShotRepairService) private readonly shotRepairService: ShotRepairService,
   ) {}
 
   @Get()
@@ -185,6 +187,25 @@ export class ProjectsController {
       })),
     });
     return { ...run.report, projectId, checkedAt: run.checkedAt };
+  }
+
+  /** 用绑定角色的参考图重画一个镜头（一致性漂移后的修正入口）。 */
+  @Post(":id/shots/:shotId/regenerate-with-references")
+  async repairShotWithReferences(@Param("id") id: string, @Param("shotId") shotId: string) {
+    const projectId = parseInt(id, 10);
+    const targetShotId = parseInt(shotId, 10);
+    if (!Number.isFinite(projectId) || !Number.isFinite(targetShotId)) {
+      throw new BadRequestException("项目或镜头 id 不合法");
+    }
+    const result = await this.shotRepairService.repairWithReferences(projectId, targetShotId);
+    this.wsGateway.sendToProject(projectId, "shot_updated", {
+      shot: {
+        id: result.shotId,
+        image_url: result.imageUrl,
+        consistency_result: result.after,
+      },
+    });
+    return result;
   }
 
   // ---- Messages ----

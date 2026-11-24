@@ -5,7 +5,10 @@ import { ConfigService } from "@nestjs/config";
 export class ImageService {
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
 
-  async generateImage(prompt: string, options?: { size?: string }): Promise<string> {
+  async generateImage(
+    prompt: string,
+    options?: { size?: string; referenceImages?: string[] },
+  ): Promise<string> {
     const provider = this.config.get<string>("app.imageProvider") || "fake";
     const fixtureUrl = this.config.get<string>("app.fakeImageFixtureUrl");
     if (provider === "fake") return fixtureUrl || placeholderDataUrl("Image fixture");
@@ -18,6 +21,7 @@ export class ImageService {
 
     if (!apiKey) return placeholderDataUrl("Image API key missing");
 
+    const references = (options?.referenceImages || []).filter(Boolean).slice(0, 4);
     const requestBody = JSON.stringify(
       isDashScope
         ? {
@@ -36,12 +40,7 @@ export class ImageService {
               size: normalizeDashScopeSize(options?.size || "1024x1024"),
             },
           }
-        : {
-            model,
-            prompt,
-            n: 1,
-            size: options?.size || "1024x1024",
-          },
+        : buildAgnesImageBody(model, prompt, options?.size || "1024x1024", references),
     );
 
     const response = await postWithRateLimitRetry(`${baseUrl}${endpoint}`, {
@@ -87,6 +86,23 @@ export class ImageService {
     }
     return null;
   }
+}
+
+/**
+ * Agnes 图生图：参考图必须放在 extra_body.image，response_format 也不能放顶层。
+ * 没有参考图时保持原来的文生图请求体，不影响既有生成链路。
+ */
+export function buildAgnesImageBody(
+  model: string,
+  prompt: string,
+  size: string,
+  referenceImages: string[] = [],
+): Record<string, unknown> {
+  const body: Record<string, unknown> = { model, prompt, n: 1, size };
+  if (referenceImages.length > 0) {
+    body.extra_body = { image: referenceImages, response_format: "url" };
+  }
+  return body;
 }
 
 export function extractMediaUrl(value: unknown): string | null {

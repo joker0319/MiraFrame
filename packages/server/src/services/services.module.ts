@@ -4,12 +4,13 @@ import { ImageService } from "./image.service";
 import { VideoService } from "./video.service";
 import { FaceService } from "./face.service";
 import { ConsistencyService } from "./consistency.service";
+import { ShotRepairService } from "./shot-repair.service";
 import { TtsService } from "./tts.service";
 import { SidecarService } from "./sidecar.service";
 
 @Global()
 @Module({
-  providers: [TextService, ImageService, VideoService, FaceService, ConsistencyService, TtsService, SidecarService],
-  exports: [TextService, ImageService, VideoService, FaceService, ConsistencyService, TtsService, SidecarService],
+  providers: [TextService, ImageService, VideoService, FaceService, ConsistencyService, ShotRepairService, TtsService, SidecarService],
+  exports: [TextService, ImageService, VideoService, FaceService, ConsistencyService, ShotRepairService, TtsService, SidecarService],
 })
 export class ServicesModule {}

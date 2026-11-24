@@ -29,6 +29,8 @@ export function ConsistencyPanel({ projectId }: { projectId: number }) {
   const [report, setReport] = useState<ConsistencyReportRead | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [repairingShot, setRepairingShot] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const run = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -42,6 +44,29 @@ export function ConsistencyPanel({ projectId }: { projectId: number }) {
       setLoading(false);
     }
   }, [projectId]);
+
+  const repair = useCallback(
+    async (shotId: number) => {
+      if (repairingShot !== null) return;
+      setRepairingShot(shotId);
+      setError(null);
+      setNotice(null);
+      try {
+        const result = await consistencyApi.repairShot(projectId, shotId);
+        const order = report?.shots.find((item) => item.shotId === shotId)?.order ?? shotId;
+        const verdict = result.after ? VERDICT_META[result.after.verdict].label : "待确认";
+        setNotice(
+          `镜头 ${String(order).padStart(2, "0")} 已按 ${result.references} 张参考图重画，新判定：${verdict}`,
+        );
+        await run();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "修正失败");
+      } finally {
+        setRepairingShot(null);
+      }
+    },
+    [projectId, report, repairingShot, run],
+  );
 
   // 进入面板即自动跑一次，命中缓存时约 2 秒
   useEffect(() => {
@@ -73,6 +98,12 @@ export function ConsistencyPanel({ projectId }: { projectId: number }) {
           <ScanFace className="h-4 w-4 shrink-0 text-ink-4" />
           正在比对画面中的人脸，首次检查约 2–3 秒…
         </div>
+      )}
+
+      {notice && !error && (
+        <p className="mt-3 rounded-[6px] border border-success/25 bg-success-tint px-2.5 py-2 text-[11.5px] leading-5 text-success">
+          {notice}
+        </p>
       )}
 
       {error && (
@@ -131,6 +162,17 @@ export function ConsistencyPanel({ projectId }: { projectId: number }) {
                           {e.name} {e.distance !== null ? e.distance.toFixed(2) : "—"}
                         </span>
                       ))}
+                      {(shot.verdict === "drift" || shot.verdict === "review") && (
+                        <button
+                          type="button"
+                          disabled={repairingShot !== null}
+                          onClick={() => void repair(shot.shotId)}
+                          className="btn btn-outline btn-xs shrink-0 px-1.5 font-sans"
+                          title="用角色参考图重新生成这一镜的画面"
+                        >
+                          {repairingShot === shot.shotId ? "重画中…" : "按参考图修正"}
+                        </button>
+                      )}
                     </span>
                   </div>
                   <p className="mt-1 pl-[26px] text-[12px] leading-5 text-ink-2">{shot.message}</p>

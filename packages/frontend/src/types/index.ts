@@ -691,6 +691,15 @@ export interface ConsistencyReportRead {
   summary: { ok: number; review: number; drift: number; unverifiable: number };
 }
 
+export interface ShotRepairResult {
+  shotId: number;
+  imageUrl: string;
+  /** 实际参与图生图的参考图数量 */
+  references: number;
+  before: (ConsistencyShotRead & { checkedAt?: string }) | null;
+  after: (ConsistencyShotRead & { checkedAt?: string }) | null;
+}
+
 // --- Universe / IP ---
 export interface Universe {
   id: number;

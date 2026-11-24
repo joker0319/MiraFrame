@@ -324,3 +324,18 @@ VIDEO_TIMEOUT_MS=300000
 **为什么只给 drift 红点**：`review`（0.45–0.60 灰区）本身是不确定而非明确失败，已经由面板的黄色「待确认」呈现；节点卡红点只报确定的漂移，避免每个项目都常亮。
 
 **验证**：后端 45 个测试全通过（新增 `consistency-auto.test.ts` 覆盖落库与时间戳）；前端 `tsc` 0 错误、`vite build` 通过。project-23 以 `target_stage=render_shot_images` 续跑，日志出现 `自动一致性检查完成 project=23 ok=2 review=4 drift=0`，6 个镜头的 `consistency_result` 全部落库，接口 `/projects/23/shots` 正常返回；临时把一个镜头改成 drift 后截图确认「角色设定」「镜头画面」节点卡红点出现，随后已恢复原值。
+
+## 一致性反哺：按角色参考图重画漂移镜头
+
+**目标**：校验只是发现问题，这一步提供修正闭环 —— 把镜头绑定角色的参考图喂给图生图模型重画该镜头，让人脸特征回到参考形象上。
+
+**探测结论**：Agnes Image 2.5 Flash 支持图生图/多图合成，参考图必须放在 `extra_body.image`，`response_format` 必须也在 `extra_body` 里（放顶层会报错），官方标注输出图和参考图当前都免费。用 project-23 的沈鸢参考图 + 镜头 4 的原提示词做了一次单图对照：沈鸢人脸距离从灰区约 0.4 降到 0.22（判定转为一致），因此确认这条路径有效。
+
+**改动**
+- `ImageService.generateImage()` 新增 `referenceImages` 选项；抽出的 `buildAgnesImageBody()` 只在有参考图时加 `extra_body.image`，文生图请求体保持不变，不影响既有生成链路。
+- `ShotRepairService`（新）：按 `shot.character_ids` 取角色图 + 参考图（每角色最多 3 张、全镜最多 4 张），拼一段「逐张说明参考图属于谁、保留原分镜与画风、不要增加角色」的提示词，走图生图重画；成功后清掉旧视频与旧一致性结果，再只对这一张跑人脸校验并把结果写回。参考图缺失直接报明确错误；人脸推理失败只 warn，不回滚已换好的图。
+- `POST /api/v1/projects/:id/shots/:shotId/regenerate-with-references`：返回 `before/after` 判定与参考图数量，并发 `shot_updated` WebSocket。
+- `ConsistencyService.analyzeShotAndStore()`：单镜头校验写回，不必为一张图重跑整页。
+- `ConsistencyPanel.tsx`：`review` / `drift` 镜头多一个「按参考图修正」按钮，重画后自动刷新报告并提示新判定；沿用纸墨语义色与 `btn` 工具类。
+
+**验证**：新增 5 个单测（请求体结构、提示词映射、参考图收集、写入字段、无参考图早失败）；后端 50 个测试全过，前后端 `tsc` 0 错误，`vite build` 通过。用一次性临时项目端到端调用新接口：生成 i2i 新图，沈鸢距离 0.2562、判定 `ok`，结果落库并广播 `shot_updated`，随后临时项目已删除，project-23 数据未改动。

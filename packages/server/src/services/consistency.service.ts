@@ -88,6 +88,23 @@ export class ConsistencyService {
     return { report, checkedAt, stored };
   }
 
+  /** 只校验并重写一个镜头（按参考图重画后用），避免为了一张图重跑整页。 */
+  async analyzeShotAndStore(input: {
+    shot: ConsistencyInput["shots"][number];
+    characters: ConsistencyInput["characters"];
+  }): Promise<StoredShotConsistency> {
+    const report = await this.analyze({ characters: input.characters, shots: [input.shot] });
+    const stored: StoredShotConsistency = {
+      ...report.shots[0],
+      checkedAt: new Date().toISOString(),
+    };
+    await this.db
+      .update(schema.shots)
+      .set({ consistencyResult: stored })
+      .where(eq(schema.shots.id, input.shot.id));
+    return stored;
+  }
+
   private async analyzeNow(input: ConsistencyInput): Promise<ConsistencyReport> {
     if (!this.face.isReady()) {
       throw new Error(`人脸模型未就绪：${this.face.getError() || "未知原因"}`);
