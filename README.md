@@ -47,29 +47,19 @@ MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简�
 
 ### 演示录制
 
-两分钟演示的分镜脚本、讲解要点与截图清单见 [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md)。录制后把下面五张图放进 `docs/screenshots/`，替换这里的占位：
+一段 18 秒的[工作流巡览视频](./docs/demo.mp4)（点击播放）：依次点开五个节点，展示已完成项目《纸鸢引》的大纲、角色、分镜、镜头画面与合成输出。视频无旁白，逐节点切换的画面截图如下。完整两分钟的讲解词与分镜脚本见 [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md)。
 
-| 画面 | 文件 | 时间点 |
-| ---- | ---- | ------ |
-| 节点流水线 + 实时日志 | `demo-workflow.jpg` | 0:20 |
-| 一致性自动修复 | `demo-repair.jpg` | 1:00 |
-| 两阶段 Critique | `demo-critique.jpg` | 1:20 |
-| 播放器字幕开关 | `demo-subtitle.jpg` | 1:40 |
-| 成片导出 | `demo-export.jpg` | 1:55 |
+![节点流水线总览](./docs/screenshots/demo-workflow.jpg)
 
-<!-- 截图补齐后取消注释
+![角色设定（真实生成图）](./docs/screenshots/demo-characters.jpg)
 
-![节点流水线与实时日志](./docs/screenshots/demo-workflow.jpg)
+![分镜脚本](./docs/screenshots/demo-shots.jpg)
 
-![一致性自动修复](./docs/screenshots/demo-repair.jpg)
+![镜头画面（6/6 视频）](./docs/screenshots/demo-frames.jpg)
 
-![两阶段 Critique](./docs/screenshots/demo-critique.jpg)
+![合成输出与导出按钮](./docs/screenshots/demo-export.jpg)
 
-![播放器字幕开关](./docs/screenshots/demo-subtitle.jpg)
-
-![成片导出](./docs/screenshots/demo-export.jpg)
-
--->
+这些画面取自一个 `completed` 状态的项目，所以一致性面板没有漂移红点、也没有展开 CritiquePanel 评分卡——这两处的交互演示需要用一个进行中的项目单独录制，脚本里已标注对应时点。
 
 ---
 
