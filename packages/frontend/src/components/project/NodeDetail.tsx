@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   Download,
@@ -33,6 +33,14 @@ import {
 import { WorkflowStatusBadge } from "./WorkflowStatusBadge";
 import { ConsistencyPanel } from "./ConsistencyPanel";
 import { CritiquePanel } from "./CritiquePanel";
+import {
+  planClipSubtitles,
+  planProjectSubtitles,
+  SubtitleOverlay,
+  SubtitleToggle,
+  useSubtitlePreference,
+  type SubtitleShotInput,
+} from "./SubtitleOverlay";
 
 export function NodeDetail({
   projectId,
@@ -187,6 +195,7 @@ export function NodeDetail({
             items={shots.map((s) => ({
               id: s.id,
               title: `镜头 ${s.order}`,
+              subtitleShots: [{ dialogue: s.dialogue }],
               url: playableOrPreviewUrl(s),
               posterUrl: s.image_url || null,
               kind: isPlayableVideoUrl(s.video_url) ? "video" : "image",
@@ -209,6 +218,7 @@ export function NodeDetail({
             projectVideoUrl={projectVideoUrl}
             playableVideoCount={playableVideoCount}
             shotCount={shots.length}
+            shots={shots}
             onOpen={setPreview}
           />
         )}
@@ -344,11 +354,13 @@ function OutputNodeDetail({
   projectVideoUrl,
   playableVideoCount,
   shotCount,
+  shots,
   onOpen,
 }: {
   projectVideoUrl: string | null;
   playableVideoCount: number;
   shotCount: number;
+  shots: Shot[];
   onOpen: (preview: MediaPreview) => void;
 }) {
   return (
@@ -358,7 +370,15 @@ function OutputNodeDetail({
           {isFinalVideoUrl(projectVideoUrl) ? (
             <button
               type="button"
-              onClick={() => onOpen({ title: "合成输出", url: projectVideoUrl, kind: "video" })}
+              onClick={() => onOpen({
+                title: "合成输出",
+                url: projectVideoUrl,
+                kind: "video",
+                subtitleShots: shots.map((shot) => ({
+                  dialogue: shot.dialogue,
+                  duration: shot.duration,
+                })),
+              })}
               className="group w-full rounded-lg border border-line-soft bg-black overflow-hidden relative"
             >
               <video src={projectVideoUrl} className="w-full max-h-[320px] bg-black object-contain" controls />
@@ -478,6 +498,7 @@ type MediaPreview = {
   url: string;
   kind: "image" | "video";
   posterUrl?: string | null;
+  subtitleShots?: SubtitleShotInput[];
 };
 
 function MediaTile({
@@ -485,6 +506,7 @@ function MediaTile({
   url,
   kind,
   posterUrl,
+  subtitleShots,
   emptyText,
   issue,
   onOpen,
@@ -493,6 +515,7 @@ function MediaTile({
   url: string | null;
   kind: "image" | "video";
   posterUrl?: string | null;
+  subtitleShots?: SubtitleShotInput[];
   emptyText: string;
   issue?: string | null;
   onOpen: (preview: MediaPreview) => void;
@@ -508,7 +531,7 @@ function MediaTile({
   return (
     <button
       type="button"
-      onClick={() => onOpen({ title, url, kind, posterUrl })}
+      onClick={() => onOpen({ title, url, kind, posterUrl, subtitleShots })}
       className={cn("group relative aspect-[4/3] w-full overflow-hidden rounded-[5px] border bg-base-200", issue ? "border-[color-mix(in_srgb,var(--color-error)_40%,transparent)]" : "border-line-soft")}
       title={`查看${title}`}
     >
@@ -547,6 +570,7 @@ function AssetStrip({
     url: string | null;
     kind: "image" | "video";
     posterUrl?: string | null;
+    subtitleShots?: SubtitleShotInput[];
     issue?: string | null;
     actionLabel?: string;
     onAction?: () => void;
@@ -567,6 +591,7 @@ function AssetStrip({
             url={item.url}
             kind={item.kind}
             posterUrl={item.posterUrl}
+            subtitleShots={item.subtitleShots}
             emptyText="等待生成"
             issue={item.issue}
             onOpen={onOpen}
@@ -593,6 +618,10 @@ function AssetStrip({
 }
 
 function MediaLightbox({ preview, onClose }: { preview: MediaPreview | null; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [duration, setDuration] = useState(0);
+  const [subtitlesOn, setSubtitlesOn] = useSubtitlePreference();
+
   useEffect(() => {
     if (!preview) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -602,6 +631,20 @@ function MediaLightbox({ preview, onClose }: { preview: MediaPreview | null; onC
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, preview]);
 
+  useEffect(() => {
+    setDuration(0);
+  }, [preview?.url]);
+
+  const subtitleShots = preview?.subtitleShots;
+  const cues = useMemo(() => {
+    if (!subtitlesOn || !subtitleShots || subtitleShots.length === 0) return [];
+    if (subtitleShots.length === 1) {
+      return planClipSubtitles(subtitleShots[0].dialogue, duration);
+    }
+    // 成片：拿到真实时长后按各镜头 duration 比例重新分配时间轴
+    return planProjectSubtitles(subtitleShots, duration);
+  }, [subtitlesOn, subtitleShots, duration]);
+
   if (!preview) return null;
 
   return (
@@ -609,6 +652,13 @@ function MediaLightbox({ preview, onClose }: { preview: MediaPreview | null; onC
       <div className="flex items-center justify-between gap-3 text-white">
         <p className="text-sm font-medium truncate">{preview.title}</p>
         <div className="flex items-center gap-2">
+          {preview.kind === "video" && subtitleShots && subtitleShots.length > 0 && (
+            <SubtitleToggle
+              enabled={subtitlesOn}
+              onToggle={setSubtitlesOn}
+              className="bg-white/10 text-white hover:bg-white/20"
+            />
+          )}
           <a href={preview.url} target="_blank" rel="noreferrer" className="btn btn-sm bg-white/10 text-white border-white/20 hover:bg-white/20">
             <ExternalLink className="h-4 w-4" />
             打开
@@ -626,7 +676,18 @@ function MediaLightbox({ preview, onClose }: { preview: MediaPreview | null; onC
       </div>
       <div className="min-h-0 flex-1 mt-4 flex items-center justify-center">
         {preview.kind === "video" ? (
-          <video src={preview.url} poster={preview.posterUrl || undefined} className="max-h-full max-w-full rounded-lg bg-black" controls autoPlay />
+          <div className="relative inline-flex max-h-full max-w-full items-center justify-center">
+            <video
+              ref={videoRef}
+              src={preview.url}
+              poster={preview.posterUrl || undefined}
+              onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+              className="max-h-full max-w-full rounded-lg bg-black"
+              controls
+              autoPlay
+            />
+            <SubtitleOverlay videoRef={videoRef} cues={cues} enabled={subtitlesOn} />
+          </div>
         ) : (
           <img src={preview.url} alt={preview.title} className="max-h-full max-w-full rounded-lg object-contain" />
         )}

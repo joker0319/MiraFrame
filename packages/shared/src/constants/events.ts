@@ -9,6 +9,7 @@ export const WS_EVENT_TYPES = [
   "version_created", "version_rollback",
   "audio_generated", "export_completed",
   "consistency_eval_completed",
+  "consistency_repair_completed",
 ] as const;
 
 export type WsEventTypeValue = (typeof WS_EVENT_TYPES)[number];
