@@ -292,6 +292,22 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 
 **可能被追问：视觉模型和文本模型是两个供应商怎么办？** → 现在复用同一条文本 provider 链，只允许用 `VISION_MODEL` 覆盖模型名（同 key 同 baseUrl、只换模型是常态，`qwen-plus` → `qwen-vl-max`）。链路本身已经过熔断保护，视觉调用失败会自动切下一家，整条链都挂也只是这一轮没有结论，不阻断生成。
 
+**Q17：字幕为什么用 DOM 叠加，不做 ffmpeg 烧录？**
+
+先看数据是不是现成的：`shots.dialogue` 是剧本格式，服务端 `planDialogue` 早就把它拆成「说话人 / 语气 / 纯台词」送 TTS 了，合成时还顺手写了个外挂 `final.srt`。所以字幕不需要新的 AI 能力，只是同一份数据的第二个出口——之前只接了「听得见」，没接「看得见」。
+
+**不做烧录有两个理由，第二个更重要。**
+
+第一个是环境：本机 Homebrew ffmpeg 9.0.2 没编 libass，`-filters` 里查不到 `subtitles`/`ass`/`drawtext`，系统字体目录也没有 PingFang。要跑通得换 ffmpeg 静态构建、把字体挂进容器。
+
+第二个是性质：烧录是把字逐帧画进像素，成片**不可逆**。改一句台词就要重新编码整条片子；而 MiraFrame 的卖点恰恰是「可反馈、可增量重生成」。用 DOM 层盖在 `<video>` 上，字幕随时开关、改文案零成本、导出 mp4 也不会被字幕污染。这跟前面「把结果正确性和渲染好看拆开」是同一个判断：渲染层缺依赖，不该挡住生成链路的正确性验证。
+
+**实现上真正要设计的是时间轴，不是样式。** 我把台词解析从 server 抽到 shared，前后端共用一份 `parseDialogue`——否则 TTS 念的字和屏幕显示的字会慢慢对不上。然后 `planSubtitleCues` 做三件事：按标点把长句切成不超过 18 字的字幕条（中文没空格，一屏三段话读不完）、段内按字数比例分配时长并给短句兜底、多段按镜头累加。单镜头的时长直接取 `onLoadedMetadata`，精确；成片不能直接用 `shots[].duration` 累加，因为台词过长时服务端会冻结末帧延长画面，得按比例缩放到视频真实总时长，否则越往后字幕越漂。
+
+组件层只监听 `timeupdate`，不启 rAF：250ms 一次对字幕够准，而且只在「当前 cue 真换了」时才 `setState`，绝大多数事件都是空转。
+
+**可能被追问：那下载出去的 mp4 没有字幕怎么办？** → 这是明说过的边界。字幕只在本站播放器可见；要带出去有三条路：配带 libass 的 ffmpeg 做真烧录、下载时附 `final.srt`（外挂，B 站/剪映都认）、或者用 `<track>` 让浏览器原生渲染 srt。我选的是先把「看得见」做出来，不为一个渲染依赖卡住主链路。
+
 ---
 
 
@@ -307,7 +323,7 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 - **provider 选路的边界**：静态优先级 + 熔断，不是按成本/延迟动态加权的负载均衡；熔断状态在进程内，多实例部署时各算各的（应改 Redis 共享）；候选链目前靠 `BASE_URL` 嗅探协议（dashscope / agnes / 通用 OpenAI），新增一家特殊协议仍要改代码。
 - **face-api 局限**：半透明、背影、非人形参考图检不出脸，标 `no_reference`，不误判但也无法校验。
 - **i2i 自动修复的边界**：只修 `drift` 不修灰区 `review`；单轮预算默认 2 个镜头（`MIRAFRAME_AUTO_REPAIR_MAX_SHOTS`），是「每次跑」而不是「全项目总量」；每个镜头只修一次，避免修脸把构图修坏后再来回震荡；预算和判定都在进程内，多实例部署时各算各的。
-- **成片字幕**：外挂 `final.srt`，没有烧录进画面。
+- **字幕的边界**：走 DOM 叠加，不烧录。导出的 `final.mp4` 不带字幕（后端另写有外挂 `final.srt`，但没有下载入口）；成片时间轴按 `shots[].duration` 比例估算，个别镜头被延长较多时会偏几百毫秒；没有字号/位置自定义，也没有双语或逐字高亮。本机 ffmpeg 无 libass 只是不做烧录的环境原因，真正的原因是烧录不可逆、和「可反馈可增量重生成」这条主线冲突。
 
 ---
 
@@ -323,5 +339,6 @@ prompt 里是两个 block：`## 长期记忆（滚动摘要）` 在前、最近�
 | Provider 与失败恢复 | `packages/server/src/services/{text,video,image,tts}.service.ts`、`config/app.config.ts` |
 | 一致性闭环 | `packages/server/src/services/{face,consistency,consistency.service,shot-repair,auto-repair}.service.ts`、`agent/agent.processor.ts` 的 `autoCheckConsistency` / `autoRepairDriftedShots` |
 | 前后端契约 | `packages/shared/src/types/*`、`constants/{events,stages,approval}.ts` |
+| 台词解析与字幕时间轴 | `packages/shared/src/utils/dialogue.ts`、`packages/frontend/src/components/project/SubtitleOverlay.tsx` |
 | 前端工作台 | `packages/frontend/src/pages/ProjectPage.tsx`、`components/project/*`、`hooks/useWebSocket.ts` |
 | 改动时间线 | `MODIFICATIONS.md` |

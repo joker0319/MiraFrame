@@ -138,9 +138,8 @@
 
 ### P1-5 补前端组件测试
 
-- **现状**：全仓 149 个用例里 **frontend 只有 1 个文件 / 4 个用例**（`frontend/src/__tests__/stores.test.tsx`），无组件、无页面测试；而前端恰好是你出身方向，被问「测试怎么做」时答不上来会可惜。
-- **动作**：给 `ConsistencyPanel`、`NodeDetail`、`useWebSocket` 的关键分支补 6–10 个 Testing Library 用例（drift 红点、按钮触发修正、WS 事件更新 store）。
-- **验收**：`pnpm test` 前端用例数从 4 升到 10+。
+- **已完成（2026-11-25）**：前端从 1 个文件 / 4 个用例升到 **3 个文件 / 23 个用例**（`stores.test.tsx`、`critique-panel.test.tsx`、`subtitle-overlay.test.tsx`），覆盖评分卡片双阶段、一致性面板、字幕时间轴与 DOM 叠加。
+- **剩余可补（收益递减）**：`NodeDetail` 的节点分支矩阵、`useWebSocket` 全事件类型的 store 落点、`ProjectPage` 的加载态与错误态。前端是你出身方向，被问「组件测试怎么做」时至少要能讲清 Testing Library 的查询优先级与 jsdom 边界。
 - **落地点**：`frontend/src/__tests__/`。
 
 ---
@@ -152,7 +151,7 @@
 | **多模态 Critic** | **已完成（2026-11-25）**：`KeyframeCriticService` 把镜头图压到长边 768 / JPEG 0.8、内联成 data URL，**一次请求带多张图**（默认 4 张，6 镜项目 2 次调用）交给视觉模型逐张评审；提示词把「图 N = 镜头 #order」写死，避免模型自己数图；结果走 `critique_result`（`stage=keyframe`）复用前端评分卡片；模型明确 `needs_regenerate` **且**分数低于阈值时，按角色参考图重画（预算默认 1 镜，建议拼进提示词）。边界：不审视频、重画后不复审、复用文本 provider 链只换 `VISION_MODEL` | `services/{keyframe-critic,keyframe-critic.service,image-encoder}.ts`、`services/text.service.ts`、`agent/agent.processor.ts` | 关键帧产出四维评分 + 问题清单，`stage=keyframe` 的卡片与分镜审查并列显示（53 个用例 + 本地真实 HTTP 视觉服务端到端） |
 | **provider 选路 / 降级** | **已完成（2026-11-25）**：`provider-routing.ts` 解析候选链（`TEXT_PROVIDERS=agnes,kimi`，scoped 变量覆盖通用值），连续失败熔断 + 指数冷却 + half-open 探测，按错误类型决定是否切换（401/403/429/5xx 切，400/422 不切也不计熔断），`GET /api/v1/providers` 输出只读健康快照。剩余：无成本/延迟加权，熔断状态不跨实例 | `services/provider-routing.ts`、`services/{text,image,video}.service.ts`、`modules/config/providers.controller.ts` | 主 provider 连续失败自动切备用并记日志（34 个用例 + 本地双 server 端到端验证） |
 | **多轮记忆** | ~~`messages` 只被拼成 contextBlock~~ → **滚动摘要已完成**（2026-11-25）：`conversation-memory.ts` 增量折叠旧轮次、`conversation_memory` 表存摘要与 `coveredThroughId` 游标；剩余 token 预算装配与反馈意图分类 | `agent-run-state.ts`、`agent/conversation-memory*.ts` | 长会话下反馈能跨 5 轮保持连贯，且 prompt 不超预算 |
-| **字幕烧录** | 成片字幕仍是外挂 `final.srt`（`video.service.ts:195-196`），无 `subtitles`/`libass` 滤镜 | `services/video.service.ts` | 输出内嵌中文字幕的 mp4（需处理容器字体） |
+| **字幕上屏** | **已完成（2026-11-25，改走 DOM 叠加方案）**：把 `parseDialogue` 抽到 shared，前后端共用一份台词解析；`planSubtitleCues` 按标点断句、按字数分配时长、按镜头累加时间轴；`SubtitleOverlay` 盖在 `<video>` 上，用 `timeupdate` 驱动，开关存 localStorage。单镜头取 `onLoadedMetadata` 的真实时长，成片按 `shots[].duration` 比例缩放到真实总时长（台词过长会冻结末帧，直接累加会漂）。**不做 ffmpeg 烧录**：本机 ffmpeg 9.0.2 无 libass、无 PingFang；更重要的是烧录把字幕固化进像素，改一句台词就要重编码整条片子。边界：导出 mp4 不带字幕 | `shared/src/utils/dialogue.ts`、`frontend/src/components/project/{SubtitleOverlay,NodeDetail}.tsx` | 播放器里逐句显示台词、可开关，导出成片仍是干净画面（25 个新用例，全仓 415） |
 | **i2i 自动修正** | **已完成（2026-11-25）**：一致性校验检出 `drift` 后自动按角色参考图重画并复检，重画在生视频之前完成，所以该镜视频直接用新图生成、不需要额外重合成。闸门三道：`MIRAFRAME_AUTO_REPAIR` 开关、图像 provider 必须是「非 fake 且有 key」（否则 `generateImage` 会静默返回占位图）、单轮预算 `MAX_SHOTS`（默认 2，按漂移程度从重到轻取）。手动面板保留为兜底 | `services/auto-repair.ts`、`agent/agent.processor.ts`、`shared/src/types/ws-events.ts` | 漂移自动重画 + 复检 + `consistency_repair_completed` 回执（32 个用例 + 本地真实 HTTP 图生图端到端） |
 | **WS 事件版本与去重** | `ws.gateway.ts:37-45` 直接 `emit`，29 类事件无版本/事件 ID/去重，前端靠 `socket.off` 防重复注册 | `ws.gateway.ts`、`shared/src/constants/events.ts` | 重连后不重复应用同一事件 |
 | **face-api 注释与实现对齐** | `face.service.ts:11-16` 注释仍写「显式切到 cpu 最稳」，实现已是优先 wasm、失败回退 cpu | `face.service.ts` | 注释与实现一致 |
@@ -165,6 +164,7 @@
 - **重写成 Python**：会毁掉「前端转 Agent、全栈 TypeScript」的叙事一致性，也是你相对其他候选人的差异化。
 - **把 i2i 改成无闸门的全自动**：一致性判定有波动，无限制重画会静默消耗生成额度。现在已经做了「有预算、有闸门、可关」的自动版本（单轮上限 + 图像服务可用性检查 + 复检兜底），不建议做的是不设上限的那种；人工面板继续保留，用于自动修不好的镜头。
 - **继续加新页面 / 新模块**：功能边际收益已经很低，时间投到 P1 的「把已有能力坐实」上回报更高。
+- **为了字幕去换 ffmpeg 静态构建做烧录**：DOM 叠加已经解决「看得见台词」，烧录只会换来不可逆的像素和一套容器字体依赖。除非产品明确要求「下载出去的 mp4 自带字幕」，否则不值得。
 - **为凑简历补一堆空壳 MCP server / 新 Agent 类**：面试一追问就露馅，不如一个真实调用。
 
 ---

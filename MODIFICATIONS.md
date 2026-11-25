@@ -643,3 +643,35 @@ MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径�
 - 全仓 **390 个测试全过**（shared 64 / agent 92 / server 221 / frontend 13），`pnpm build` / `pnpm typecheck` 通过。
 
 **没做**：不审视频（要抽帧，成本和时延另算）；重画后不复审，否则「审-改-审」会在主观判定上无限循环；视觉判定没有校准集，换模型后阈值该不该调只能靠观察；复用文本 provider 链只换模型名，如果视觉服务是独立账号/域名，得先扩 `resolveProviderChain` 的 capability；单轮只审前 8 个镜头，是额度保护不是能力上限。
+
+---
+
+## 字幕叠加：把 `dialogue` 从「配音分支」接到「画面分支」
+
+**动机**：`shots.dialogue` 一直有两份消费者却只接了一份。`video.service.ts` 用 `planDialogue` 拆台词送 TTS，还在合成时顺手写了外挂 `final.srt`；但播放器里一个字都看不见。想让台词上屏，最直接的想法是 ffmpeg 烧录（`subtitles` 滤镜 + ASS 样式），可本机 Homebrew ffmpeg 9.0.2 没编 libass，`-filters` 里连 `subtitles`/`ass`/`drawtext` 都没有，系统字体目录也没有 PingFang。为了一个渲染依赖去换 ffmpeg 静态构建，还要把字体挂载进容器，收益只是「字幕不可逆地固化进 mp4」——不划算。
+
+**所以选 DOM 叠加**：字幕是盖在 `<video>` 上的一层 React 组件，不碰视频像素。改一句台词不用重新编码、可以随时开关、导出 mp4 也不会被字幕污染。代价是**导出的成片不带字幕**（下面「没做」里写清楚）。
+
+**解析规则必须只有一份**。第一反应是在前端再写一个正则把「沈鸢（轻声）：『……』」拆开，但这正是漂移的开始：TTS 念的字和屏幕上显示的字会慢慢对不上。于是把 `parseDialogue` / `cleanLine` / `estimateSeconds` 从 `server/src/services/dialogue.ts` 抽到 `shared/src/utils/dialogue.ts`，服务端只保留「解析结果 → 音色/语速/音量」的配音编排，并 re-export 原 API，既有 `dialogue.test.ts` 一行没改。
+
+**时间轴是这次真正要设计的部分**
+
+`planSubtitleCues(segments, options)` 输出 `{start, end, text, speaker}[]`：
+
+1. 先把每句台词按标点切成不超过 18 字的字幕条（句末标点优先、逗号次之、没有标点就硬切）——中文没空格，一屏塞三段话读不完。
+2. 段内按字数比例分配时长，并给短句一个 `minSeconds` 兜底。抬高低谷的时长要从高峰等比例扣回来，否则总长会溢出到下一段。
+3. 段与段按镜头顺序累加。单镜头的 duration 直接取 `<video>` 的 `onLoadedMetadata`，精确；成片则把 `shots[].duration` 按比例缩放到视频真实总时长——因为台词过长时 `buildStagedClip` 会冻结末帧延长画面，各镜头 duration 之和并不等于成片时长，硬用累加值会越漂越远。
+
+**组件层两个刻意的克制**
+
+- 用 `timeupdate` 驱动，不启 `requestAnimationFrame`：浏览器约 250ms 派发一次，对字幕切换足够准，又不会每帧触发 React 重渲染；监听里只在「当前 cue 真的换了」时才 `setState`。
+- 开关状态放 `localStorage`，单镜头灯箱和成片播放器共用；字幕层 `pointer-events-none`，不抢原生 controls 的点击。
+
+**接入点**：`NodeDetail.tsx` 的 `MediaTile / MediaPreview` 增加可选 `subtitleShots`，镜头缩略图点开灯箱时带该镜台词，成片按钮带整组镜头；`MediaLightbox` 拿到视频真实时长后重算 cue，工具条多一个「字幕」开关。
+
+**验证**
+- shared 15 个新用例（`subtitle.test.ts`）：shared 版解析、长句断句、单镜头铺满、旁白/说话人前缀、多角色长句拆条与不重叠、无 duration 时估算、多段累加、`totalDuration` 缩放、超长台词压缩不越界、空输入。
+- 前端 10 个新用例（`subtitle-overlay.test.tsx`）：时间落在区间内显示、切换条目、空隙不残留、关闭不渲染、无台词不渲染、`seeked` 重新定位、单镜头/成片时间轴、开关持久化到 localStorage。
+- 全仓 **415 个测试全过**（shared 79 / agent 92 / server 221 / frontend 23），`pnpm -r build` / `pnpm -r typecheck` 通过。
+
+**没做**：导出的 `final.mp4` 不带字幕，字幕只在本站播放器里可见（要带出去得配带 libass 的 ffmpeg 做真烧录，或让下载同时给 `final.srt`）；成片时间轴是按镜头 duration **比例**估算，个别镜头被延长较多时字幕会偏几百毫秒；字幕没有字号/位置自定义，也没做双语或卡拉 OK 逐字高亮。
