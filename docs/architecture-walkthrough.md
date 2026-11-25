@@ -102,7 +102,7 @@ frontend  ──HTTP/WS──▶  server  ──import──▶  agent
 3. `ctx.callLlm(system, user, {maxTokens, intent})`
    → processor 把 `projectContext + "\n\nTask:\n" + user` 拼起来，交给 `TextService.generate()`
    → `TextService` 按 `TEXT_PROVIDER` 决定走真实 HTTP 还是 `generateFakeResponse(intent)`
-4. 解析 JSON（`extractJson` 先去 ```json 围栏，再正则抓第一个 `{...}`），失败就 `{raw: text}` 兜底
+4. 解析 JSON（`extractJson` 先去掉 JSON 代码围栏，再正则抓第一个 `{...}`），失败就 `{raw: text}` 兜底
 5. `ctx.saveOutline()` → 写 `project.story_outline / visual_bible` + 推 `outline_updated`
 6. 返回 `{currentStage:"plan_outline", nextStage:"outline_approval", stageHistory:["plan_outline"], reviewRequested:false}`
 

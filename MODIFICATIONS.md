@@ -1,6 +1,8 @@
 # MiraFrame 修改说明
 
 > 本项目基于 GitHub 上的一个开源项目进行二次修改与能力增强。以下记录本次修改的完整内容。
+>
+> 文档整合说明：原 `RESUME.md`、`INTERVIEW_GUIDE.md`、`ROADMAP.md` 已合并为 [CAREER_HANDBOOK.md](./CAREER_HANDBOOK.md)；下文出现的旧文件名均为当时的历史记录。
 
 ## 项目定位
 
@@ -699,4 +701,4 @@ MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径�
 
 **演示脚本**。`docs/DEMO_SCRIPT.md` 给出 2 分钟、7 段的分镜表：每段的时间、画面、操作和讲解要点；README 产品截图章节预留五张图的文件名与时间点（注释占位，图没到齐不会破图）。录制重点是人工确认门、一致性自动修复、两阶段 Critique 和字幕开关这些只有本项目才有的东西，不是堆生成结果。
 
-**脱稿速记卡**。`docs/INTERVIEW_CHEATSHEET.md` 把 Q1–Q17 压成「一句话锚点 + 三个关键词」，Q14–Q17 展开讲法层次（旧痛点 → 设计 → 被测试逼出来的取舍 → 边界），另附主动交代的边界清单与代码定位表。`INTERVIEW_GUIDE.md` 顶部加了入口。
+**脱稿速记卡**。`docs/INTERVIEW_CHEATSHEET.md` 把 Q1–Q17 压成「一句话锚点 + 三个关键词」，Q14–Q17 展开讲法层次（旧痛点 → 设计 → 被测试逼出来的取舍 → 边界），另附主动交代的边界清单与代码定位表；当时的 `INTERVIEW_GUIDE.md`（现已并入 `CAREER_HANDBOOK.md`）顶部加了入口。

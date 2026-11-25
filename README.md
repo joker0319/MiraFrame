@@ -1,203 +1,35 @@
 # MiraFrame 弥镜
 
-> 本项目基于 GitHub 上的开源项目进行修改与能力增强，本次修改内容详见 [MODIFICATIONS.md](./MODIFICATIONS.md)。
+> 基于 GitHub 开源项目二次改造的**学习 / 演示 / 原型项目**。具体改了什么见 [MODIFICATIONS.md](./MODIFICATIONS.md)。
 
-<div align="center">        
-  <p><strong>一个全 TypeScript 的 AI 漫剧生成项目</strong></p>        
-  <p>从故事想法出发，用 LangGraph.js 编排多 Agent，生成故事大纲、角色设定、分镜脚本、角色图与镜头素材。</p>
+![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?style=flat-square)
+![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square)
+![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?style=flat-square)
+![LangGraph.js](https://img.shields.io/badge/LangGraph.js-v1.x-6D28D9?style=flat-square)
+![pnpm](https://img.shields.io/badge/pnpm-monorepo-F69220?style=flat-square)
 
-  <p>        
-    <img src="https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square\\\\\\\\\\\\\\\&logo=typescript\\\\\\\\\\\\\\\&logoColor=white" alt="TypeScript" />        
-    <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square\\\\\\\\\\\\\\\&logo=react\\\\\\\\\\\\\\\&logoColor=111827" alt="React" />        
-    <img src="https://img.shields.io/badge/Nest.js-11-E0234E?style=flat-square\\\\\\\\\\\\\\\&logo=nestjs\\\\\\\\\\\\\\\&logoColor=white" alt="NestJS" />        
-    <img src="https://img.shields.io/badge/LangGraph.js-v1.x-6D28D9?style=flat-square" alt="LangGraph.js" />        
-    <img src="https://img.shields.io/badge/pnpm-monorepo-F69220?style=flat-square\\\\\\\\\\\\\\\&logo=pnpm\\\\\\\\\\\\\\\&logoColor=white" alt="pnpm" />        
-    <img src="https://img.shields.io/badge/Drizzle-ORM-C5F74E?style=flat-square\\\\\\\\\\\\\\\&logo=drizzle\\\\\\\\\\\\\\\&logoColor=111827" alt="Drizzle ORM" />        
-  </p>        
-</div>
-
-MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简单调用一次大模型，而是把“故事大纲 → 角色设定 → 分镜脚本 → 角色图 → 镜头素材 → 导出”拆成可观察、可重试、可人工反馈的创作流水线。
-
-这个项目特别适合正在从前端转向 AI Agent / AI 应用工程的同学：
-
-- 前端、后端、Agent、共享类型全部使用 TypeScript。
-- 前端使用 React + Vite + Zustand + TanStack Query，学习成本贴近常见前端项目。
-- 后端使用 Nest.js，把 API、WebSocket、队列、数据库和 Agent 服务拆成清晰模块。
-- Agent 层使用 LangGraph.js，可以学习状态图、节点编排、人工反馈、重试和工作流恢复。
-- 项目不是纯 Demo，有项目页、节点详情、设置面板、生成服务配置、失败重试等真实产品逻辑。
-
-> [!NOTE]  
-> MiraFrame 目前定位为学习、演示和产品原型项目。它适合研究 AI Agent 工程化链路，不建议不经改造直接用于生产环境。
+**用大白话说**：给它一句故事想法，它按「大纲 → 角色 → 分镜 → 角色图 → 镜头画面 → 视频 → 成片」一步步做出来。每一步都能看到进度、停下来让人确认或修改；某一步调用失败，也不会把前面做好的成果全部重来。
 
 ---
 
-## 产品截图
+## 1. 先说清楚：它是什么，不是什么
 
-### 项目列表
-
-![MiraFrame 项目列表](./docs/screenshots/projects.jpg)
-
-### 项目工作台
-
-![MiraFrame 项目工作台](./docs/screenshots/project-workspace.jpg)
-
-### 生成服务设置
-
-![MiraFrame 生成服务设置](./docs/screenshots/settings.jpg)
-
-### 演示录制
-
-一段 19 秒的[工作流巡览视频](./docs/demo.mp4)（点击播放）：从首页输入一段故事开始，跳转工作台后依次点开五个节点，最后停在成片画面。视频无旁白，关键画面截图如下。完整两分钟的讲解词与分镜脚本见 [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md)。
-
-![首页输入故事](./docs/screenshots/demo-home-input.jpg)
-
-![节点流水线总览](./docs/screenshots/demo-workflow.jpg)
-
-![角色设定（真实生成图）](./docs/screenshots/demo-characters.jpg)
-
-![分镜脚本](./docs/screenshots/demo-shots.jpg)
-
-![镜头画面（6/6 视频）](./docs/screenshots/demo-frames.jpg)
-
-![合成输出与导出按钮](./docs/screenshots/demo-export.jpg)
-
-![成片画面（沈鸢与阿砚）](./docs/screenshots/demo-generated-frame.jpg)
-
-这些画面取自一个 `completed` 状态的项目，所以一致性面板没有漂移红点、也没有展开 CritiquePanel 评分卡——这两处的交互演示需要用一个进行中的项目单独录制，脚本里已标注对应时点。首页填字后展示的工作台跳转用的是同一个已完成项目（没有真的提交生成、以免消耗额度），所以视频呈现的是「输入 → 已有成果」的流程示意。
+| 它是什么 | 它不是什么 |
+| --- | --- |
+| 学习 AI Agent 工程化的完整例子：状态图、人工确认、断点恢复、失败降级都真实存在 | 不是开箱即用的商业产品，也没有公网部署 |
+| 本地能跑起来的全栈原型：有页面、数据库、队列、WebSocket 实时进度 | 不是模型训练项目，没有自己训模型 |
+| 可以接真实文本 / 图像 / 视频模型；也可以切 `fake` 模式，不花 API 钱跑通流程 | `fake` 模式只会给占位图，不要拿它判断生成质量 |
+| 前端转 AI Agent 方向的面试素材：全仓库 TypeScript，前后端共享类型 | 不是「一句 prompt 出片」的玩具 Demo |
 
 ---
 
-## 你可以学到什么
+## 2. 本地跑起来
 
-如果你是前端出身，这个项目可以作为进入 AI Agent 工程的第一条完整路径：
-
-| 学习方向              | 项目里的对应实现                                             |
-| ----------------- | ---------------------------------------------------- |
-| AI 产品流程           | 把漫剧创作拆成故事、角色、分镜、图片、视频、导出等阶段                          |
-| Agent 编排          | 使用 LangGraph.js 构建多节点状态图                             |
-| Human-in-the-Loop | 在故事大纲、角色设定、分镜脚本阶段支持用户反馈修改                            |
-| 前后端类型共享           | `@miraframe/shared` 提供 Zod Schema 和 TypeScript 类型    |
-| 实时进度同步            | 后端 WebSocket 推送节点状态、日志和生成结果                          |
-| 质量闭环              | face-api 归一化比对判角色漂移 → 自动 i2i 重画 → 复检，带单轮预算与开关 |
-| 多模态 Critic         | 关键帧压至 768/JPEG 后多图批量送视觉模型，逐镜打分并检出画风/肢体/构图问题 |
-| 失败处理              | 单 provider 内分类重试；跨 provider 支持候选链切换 + 熔断（`GET /api/v1/providers` 只读观测） |
-| 生成服务配置            | 文本、图像、视频服务可在设置面板中配置和测试                               |
-| 全栈工程结构            | pnpm workspace 管理 frontend / server / agent / shared |
-
-> **准备面试 / 求职时，按用途挑文档：**
-> - [RESUME.md](./RESUME.md)：简历项目经历怎么写（五个岗位版本、量化数据、措辞红线）
-> - [INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md)：三档讲法、五个带代码位置的 STAR 案例、六大 Agent 考点映射，以及需要主动交代的边界
-> - [ROADMAP.md](./ROADMAP.md)：后续优化的优先级、工作量与落地顺序
-
----
-
-## 核心功能
-
-- 项目管理：创建、查看、批量删除漫剧项目。
-- 多阶段工作流：故事大纲、角色设定、分镜脚本、镜头画面、视频与导出。
-- 节点详情：在项目页查看每个节点的产物、状态和错误信息。
-- 角色一致性闭环：镜头图生成后自动做人脸比对，检出漂移自动按角色参考图重画并复检（可用 `MIRAFRAME_AUTO_REPAIR=0` 关掉、退回手动修正）。
-- 关键帧视觉审查：用视觉模型逐张看画面，按画风、画面质量、构图、一致性四维打分；检出结构性缺陷（手指畸形、画风跑偏、主体被切）时按参考图重画。配 `VISION_MODEL` 生效，`MIRAFRAME_KEYFRAME_CRITIC=0` 可关闭。
-- 逐句字幕：播放器上盖一层 DOM 字幕，台词按标点断句、随播放进度切换，可一键开关；字幕只在本站播放器可见，导出的 mp4 保持干净画面。
-- 可反馈节点：故事大纲、角色设定、分镜脚本支持用户输入修改意见。
-- 生成服务设置：在 UI 中配置文本、图像、视频生成服务。
-- 弱提示：未配置真实生成服务时，在入口页给出轻量提醒。
-- 深浅色主题：默认跟随系统主题，用户切换后保存偏好。
-- Fake Provider：没有外部 API Key 时，也可以用 fake 模式跑通基础流程。
-
----
-
-## 技术架构
-
-```
-MiraFrame/
-├── packages/
-│   ├── frontend/        # React 18 + Vite + Zustand + TanStack Query
-│   ├── server/          # Nest.js API + WebSocket + Drizzle + BullMQ
-│   ├── agent/           # LangGraph.js 工作流与 Agent 节点
-│   └── shared/          # 共享类型、Zod Schema、常量
-├── docs/screenshots/    # README 截图
-├── docker-compose.yml
-├── docker-compose.dev.yml
-├── Dockerfile.server
-├── Dockerfile.frontend
-└── .env.example
-```
-
-依赖方向：
-
-```text
-frontend  ─┐
-server    ─┼──> shared
-agent     ─┘
-
-server ──> agent
-```
-
-`shared` 是类型和 Schema 的单一数据源。前端拿它做类型约束，后端拿它做接口与数据校验，Agent 层也复用同一套阶段和状态定义。
-
----
-
-## 工作流概览
-
-MiraFrame 的生成流程不是一次性请求，而是一个可恢复的多阶段 Agent 图：
-
-```text
-故事输入
-  ↓
-故事大纲
-  ↓ 用户可反馈修改
-角色设定
-  ↓ 用户可反馈修改
-分镜脚本
-  ↓ 用户可反馈修改
-角色图生成
-  ↓
-镜头画面生成
-  ↓
-视频素材生成
-  ↓
-导出
-```
-
-当前项目中保留了典型 AI Agent 应用会遇到的产品问题：
-
-- 什么时候让用户反馈，什么时候让系统自动推进。
-- 生成失败后如何展示错误，而不是一直停留在“生成中”。
-- 右侧日志和节点详情输入框如何分工，避免重复交互。
-- 配置不完整时如何弱提示，而不是直接阻断用户。
-
----
-
-## 技术栈
-
-| 层级       | 技术                                    |
-| -------- | ------------------------------------- |
-| 语言       | TypeScript 5.5+                       |
-| 包管理      | pnpm 9 workspace                      |
-| 前端       | React 18, Vite 6, React Router 7      |
-| 前端状态     | Zustand 5, TanStack Query 5           |
-| UI       | TailwindCSS 4, Radix UI, lucide-react |
-| 后端       | Nest.js 11                            |
-| Agent 编排 | LangGraph.js v1.x                     |
-| 数据库      | PostgreSQL 16                         |
-| ORM      | Drizzle ORM, drizzle-zod              |
-| 队列 / 缓存  | Redis 7, BullMQ                       |
-| 实时通信     | Socket.IO                             |
-| 测试       | Vitest, Testing Library, Playwright   |
-| 部署       | Docker Compose                        |
-
----
-
-## 快速开始
-
-### 1. 准备环境
-
-需要安装：
+### 准备
 
 - Node.js >= 22
 - pnpm >= 9
-- Docker Desktop，或本地 PostgreSQL + Redis
+- Docker Desktop（或者本地已有 PostgreSQL + Redis）
 
 启用 pnpm：
 
@@ -206,220 +38,156 @@ corepack enable
 corepack prepare pnpm@9.12.0 --activate
 ```
 
-### 2. 启动数据库和 Redis
-
-开发环境可以只用 Docker 启动基础设施：
+### 四步启动
 
 ```bash
+# 1. 只启动数据库和 Redis
 docker compose -f docker-compose.dev.yml up -d
-```
 
-默认会启动：
-
-- PostgreSQL: `localhost:5432`
-- Redis: `localhost:6379`
-- 数据库名: `miraframe`
-
-### 3. 配置环境变量
-
-```bash
+# 2. 准备环境变量（默认 fake provider，不需要 API Key）
 cp .env.example .env
+
+# 3. 安装依赖
+pnpm install
+
+# 4. 分别开两个终端，启动后端和前端
+pnpm --dir packages/server dev
+pnpm --dir packages/frontend dev
 ```
 
-默认 `.env.example` 使用 fake provider，可以先不填真实 API Key：
+然后打开：
 
-```env
-TEXT_PROVIDER=fake
-IMAGE_PROVIDER=fake
-VIDEO_PROVIDER=fake
-```
+- 前端：<http://localhost:5173>
+- 后端 API：<http://localhost:3000>
 
-如果要接入真实生成服务，可以改成：
+### 想看真实生成效果
+
+可以在页面右上角「设置」里填 Key，或者改 `.env` 后**重启后端**：
 
 ```env
 TEXT_PROVIDER=openai
 TEXT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-TEXT_API_KEY=your_text_api_key
-TEXT_MODEL=deepseek-v4-flash
-
-IMAGE_PROVIDER=openai
-IMAGE_API_KEY=your_image_api_key
-
-VIDEO_PROVIDER=openai
-VIDEO_API_KEY=your_video_api_key
+TEXT_API_KEY=你的_key
+TEXT_MODEL=模型名
 ```
 
-也可以启动项目后，在右上角“设置”面板中配置文本、图像和视频生成服务。
-
-需要多个供应商兜底时，声明候选链即可（按顺序尝试，连续失败自动熔断并切下一家；不写 `*_PROVIDERS` 时行为与单 provider 完全一致）：
+一家供应商挂了想自动换下一家，用候选链（按顺序试，连续失败就熔断并切备用）：
 
 ```env
 TEXT_PROVIDERS=agnes,kimi
 TEXT_KIMI_BASE_URL=https://api.moonshot.cn/v1
-TEXT_KIMI_API_KEY=your_kimi_key
+TEXT_KIMI_API_KEY=你的_key
 TEXT_KIMI_MODEL=kimi-k3
 ```
 
-熔断参数可用 `PROVIDER_FAILURE_THRESHOLD` / `PROVIDER_COOLDOWN_MS` / `PROVIDER_MAX_COOLDOWN_MS` 调整；`GET /api/v1/providers` 可以查看链上各家的状态、成功率、平均延迟与剩余冷却时间（不含密钥与 baseUrl）。
-
-### 4. 安装依赖
-
-```bash
-pnpm install
-```
-
-### 5. 启动开发服务
-
-后端：
-
-```bash
-pnpm --dir packages/server dev
-```
-
-前端：
-
-```bash
-pnpm --dir packages/frontend dev
-```
-
-常用访问地址：
-
-- 前端: <http://localhost:5173>
-- 后端 API: <http://localhost:3000>
+不写 `*_PROVIDERS` 时行为和单供应商完全一样。可用 `GET /api/v1/providers` 查看各家的健康状态（不含密钥）。完整变量说明见 [.env.example](./.env.example)。
 
 ---
 
-## Docker 运行
+## 3. 先看效果，再决定要不要跑
 
-生产式本地运行：
+一段 19 秒无旁白的[工作流巡览视频](./docs/demo.mp4)：从首页输入故事，跳到工作台，依次点开五个节点，最后停在成片画面。
 
-```bash
-docker compose up -d
-```
+![首页输入故事](./docs/screenshots/demo-home-input.jpg)
 
-注意：项目已从 openOii 迁移为 MiraFrame。不要随意修改 Docker Compose 的 project name 或 volume 名称，否则可能会创建新的数据库卷，导致旧数据看起来“消失”。
+![节点流水线总览](./docs/screenshots/demo-workflow.jpg)
+
+![成片画面（沈鸢与阿砚）](./docs/screenshots/demo-generated-frame.jpg)
+
+**诚实说明**：视频里首页填字后展示的是同一个已完成项目，没有真的提交生成（避免消耗额度）；素材来自真实项目 23《纸鸢引》。一致性漂移红点、评分卡展开、字幕开关这三处需要正在进行中的项目另录，完整两分钟讲解词和分镜表见 [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md)。
 
 ---
 
-## 常用命令
+## 4. 主要功能（人话版）
+
+| 功能 | 解决什么问题 |
+| --- | --- |
+| 多阶段生成工作流 | 把「想法 → 成片」拆开，每步有自己的状态和产物，不用一次请求硬等 |
+| 人工确认与反馈 | 大纲、角色、分镜阶段会停下来等人确认，也能输入意见重做这一段 |
+| 失败恢复 | 限流、故障、坏 JSON 都有降级路径；已完成素材可复用，按阶段续跑 |
+| 角色一致性闭环 | 镜头图出来自动做人脸比对；漂移镜头按角色参考图重画并复检，有开关和单轮预算 |
+| 关键帧视觉审查 | 视觉模型逐张看画面，按画风 / 质量 / 构图 / 一致性打分，检出问题可重画 |
+| 逐句字幕 | 播放器上盖一层 DOM 字幕，随播放进度切换，可开关；导出 mp4 保持干净画面 |
+| 供应商选路与熔断 | 同一家内重试扛抖动，跨供应商候选链扛故障（密钥失效、欠费等） |
+| 实时进度 | 后端通过 WebSocket 推送节点状态、日志、产物和告警 |
+
+---
+
+## 5. 代码怎么放
+
+```text
+MiraFrame/
+├── packages/
+│   ├── frontend/   # React 18 + Vite + Zustand + TanStack Query
+│   ├── server/     # NestJS API + WebSocket + Drizzle + BullMQ
+│   ├── agent/      # LangGraph.js 状态图与 Agent 节点
+│   └── shared/     # 共享类型、Zod Schema、阶段名、WS 事件
+├── docs/           # 演示视频、截图、专题文档
+├── docker-compose.yml / docker-compose.dev.yml
+└── .env.example
+```
+
+依赖方向很简单：`frontend → server → agent`，三者都依赖 `shared`。
+
+- `shared` 只放契约，前后端共用一套类型和校验规则。
+- `agent` 只管决策，不认识数据库和 HTTP。
+- `server` 负责「脏活」：数据库、队列、供应商调用、消息推送。
+- `frontend` 只通过 REST 和 WebSocket 跟后端说话。
+
+逐文件、逐字段走一遍完整请求链路，见 [docs/architecture-walkthrough.md](./docs/architecture-walkthrough.md)。
+
+---
+
+## 6. 文档地图：按目的找
+
+| 你想做的事 | 看哪份 |
+| --- | --- |
+| 第一次了解项目、本地跑起来 | 就是本文 |
+| 写简历、准备面试、看改造进度 | [CAREER_HANDBOOK.md](./CAREER_HANDBOOK.md)：简历模板 + 讲法 + 五个 STAR + 17 问答 + 完成度；[考前速记卡](./docs/INTERVIEW_CHEATSHEET.md)：两页纸 |
+| 想知道改了什么、为什么改 | [MODIFICATIONS.md](./MODIFICATIONS.md)：改造流水账 |
+| 想跟着代码走一次生成 | [docs/architecture-walkthrough.md](./docs/architecture-walkthrough.md) |
+| 要录演示 / 补截图 | [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md) |
+| 看最初的改造方案（历史材料，多数已实现） | [docs/multi-agent-upgrade-plan.md](./docs/multi-agent-upgrade-plan.md) |
+
+---
+
+## 7. 常见问题
+
+**没有 API Key 能跑吗？**
+可以。`.env` 里三个 provider 都设成 `fake` 就能跑通基础流程，但只适合看交互，不适合看生成质量。
+
+**为什么页面提示「生成服务还没有完全配置」？**
+文本 / 图像 / 视频里至少一项还是 `fake`，或者真实 provider 缺 `BASE_URL`、`API_KEY`、`MODEL`。去右上角设置面板补上即可。
+
+**改了 `.env` 为什么没生效？**
+部分配置到不了已启动的进程，改完请重启后端开发服务。
+
+**导出的 mp4 为什么没有字幕？**
+字幕是盖在 `<video>` 上的 DOM，不写进视频像素——改台词不用重新编码整条片子。合成时后端另存了 `final.srt`（`static/exports/project-<id>/final.srt`），要带字幕交付就和 mp4 一起导入剪辑软件。
+
+**数据库名从 openOii 改成 MiraFrame，会丢数据吗？**
+默认库名现在是 `miraframe`。不要随意改 Docker Compose 的 project name 或 volume 名，否则可能挂到新卷、旧数据看起来「消失」。
+
+**能直接部署上线吗？**
+暂时不能。Docker 文件只是骨架，公网部署前还缺 ffmpeg / ffprobe、`say` 语音、自动迁移、若干环境变量与静态卷配置。当前定位是本地学习、演示和原型。
+
+---
+
+## 8. 常用命令
 
 ```bash
-# 类型检查
-pnpm typecheck
-
-# 单元测试
-pnpm test
-
-# 监听测试
-pnpm test:watch
-
-# 代码检查
-pnpm lint
-pnpm lint:fix
-
-# 构建全部包
-pnpm build
+pnpm test         # 全仓测试
+pnpm typecheck    # 类型检查
+pnpm build        # 构建所有包
+pnpm lint         # 代码检查
+pnpm test:watch   # 监听模式跑测试
 
 # 数据库迁移
 pnpm --dir packages/server db:generate
 pnpm --dir packages/server db:migrate
 ```
 
----
-
-## 包说明
-
-### `@miraframe/frontend`
-
-前端应用，负责项目列表、项目工作台、节点详情、设置面板、主题切换和实时状态展示。
-
-重点可以学习：
-
-- 如何用 React Query 管理服务端状态。
-- 如何用 Zustand 管理局部 UI 状态。
-- 如何把复杂项目页拆成 hooks、组件和 workflow 工具函数。
-- 如何设计 AI 生成过程中的错误态、重试入口和用户反馈入口。
-
-### `@miraframe/server`
-
-Nest.js 后端，负责 REST API、WebSocket、数据库、队列、生成服务配置和 Agent 调度。
-
-重点可以学习：
-
-- Nest.js 模块边界如何划分。
-- 如何把 Agent 服务接入传统后端。
-- 如何把生成任务放入后台执行。
-- 如何把 LLM、图像、视频服务抽象成可配置 provider。
-
-### `@miraframe/agent`
-
-LangGraph.js 工作流层，负责把创作流程拆成多个节点并维护状态。
-
-重点可以学习：
-
-- 状态图如何表达创作流水线。
-- 节点之间如何传递上下文。
-- 用户反馈如何触发局部重生成。
-- 失败、重试、审批和恢复如何影响 Agent 产品体验。
-
-### `@miraframe/shared`
-
-共享包，放置 TypeScript 类型、Zod Schema、工作流阶段、WebSocket 事件等跨端契约。
-
-重点可以学习：
-
-- 如何避免前后端接口类型漂移。
-- 如何让运行时校验和编译时类型共用一套 Schema。
-
----
-
-## 环境变量速览
-
-完整配置见 [`.env.example`](./.env.example)。
-
-| 分类      | 关键变量                                                                                 |
-| ------- | ------------------------------------------------------------------------------------ |
-| 基础      | `NODE_ENV`, `PORT`, `CORS_ORIGINS`, `PUBLIC_BASE_URL`                                |
-| 数据库     | `DATABASE_URL`                                                                       |
-| Redis   | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT`                                              |
-| 文本生成    | `TEXT_PROVIDER`, `TEXT_BASE_URL`, `TEXT_API_KEY`, `TEXT_MODEL`, `TEXT_ENDPOINT`      |
-| 图像生成    | `IMAGE_PROVIDER`, `IMAGE_BASE_URL`, `IMAGE_API_KEY`, `IMAGE_MODEL`, `IMAGE_ENDPOINT` |
-| 视频生成    | `VIDEO_PROVIDER`, `VIDEO_BASE_URL`, `VIDEO_API_KEY`, `VIDEO_MODEL`, `VIDEO_ENDPOINT` |
-| 语音 / 音乐 | `TTS_ENABLED`, `TTS_DEFAULT_VOICE`, `BGM_ENABLED`, `BGM_VOLUME`                      |
-| 工作流     | `CRITIC_SCORE_THRESHOLD`, `CRITIC_MAX_ROUNDS`（由 agent 包读取）                   |
-
----
-
-## 常见问题
-
-### 没有配置真实生成服务，可以运行吗？
-
-可以。把 `TEXT_PROVIDER`、`IMAGE_PROVIDER`、`VIDEO_PROVIDER` 设置为 `fake`，项目就可以在不消耗外部 API 的情况下跑通基础流程。
-
-### 为什么项目列表提示“生成服务还没有完全配置”？
-
-说明文本、图像、视频服务里至少有一项仍在使用 fake provider，或真实 provider 缺少 `BASE_URL`、`API_KEY`、`MODEL` 等关键配置。可以点击右上角设置按钮进行配置。
-
-### 修改 `.env` 后为什么没有立刻生效？
-
-部分配置可以在当前进程中更新，部分服务初始化配置可能需要重启后端进程。遇到连接测试异常时，优先重启 `packages/server` 开发服务。
-
-### 导出的 mp4 里为什么没有字幕？
-
-字幕是盖在 `<video>` 上的一层 DOM，不会写进视频像素。这是刻意的选择：改一句台词不用重新编码整条片子，也能随时开关。合成成片时后端会另外生成 `final.srt`（`static/exports/project-<id>/final.srt`），需要带字幕交付时可以把它和 mp4 一起导入剪辑软件。如果产品明确要求「mp4 自带字幕」，那需要一份编了 libass 的 ffmpeg 做真烧录，本机 Homebrew 版不带这个滤镜。
-
-### 数据库名从 openOii 改成 MiraFrame，会不会丢数据？
-
-项目现在默认数据库名是 `miraframe`。如果你迁移过旧数据库，需要确认 Docker volume 和数据库都已经迁移。不要随意删除 volume，也不要随便改 Compose project name。
-
----
-
-## 适合谁
-
-- 想从前端转向 AI Agent 应用开发的工程师。
-- 想学习 LangGraph.js 但不想只看抽象示例的同学。
-- 想了解 AI 生成类产品如何处理状态、失败、重试、反馈和配置的人。
-- 想做 AI 漫剧、短剧、分镜、图片/视频生成产品原型的团队。
+**当前基线**（截至 2026-11-25，commit `c49fb69`，72 个提交）：443 个测试通过（shared 79 / agent 92 / server 221 / frontend 51），`pnpm build` 与 `pnpm typecheck` 通过。
 
 ---
 
