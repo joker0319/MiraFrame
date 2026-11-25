@@ -47,7 +47,9 @@ MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简�
 
 ### 演示录制
 
-一段 18 秒的[工作流巡览视频](./docs/demo.mp4)（点击播放）：依次点开五个节点，展示已完成项目《纸鸢引》的大纲、角色、分镜、镜头画面与合成输出。视频无旁白，逐节点切换的画面截图如下。完整两分钟的讲解词与分镜脚本见 [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md)。
+一段 19 秒的[工作流巡览视频](./docs/demo.mp4)（点击播放）：从首页输入一段故事开始，跳转工作台后依次点开五个节点，最后停在成片画面。视频无旁白，关键画面截图如下。完整两分钟的讲解词与分镜脚本见 [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md)。
+
+![首页输入故事](./docs/screenshots/demo-home-input.jpg)
 
 ![节点流水线总览](./docs/screenshots/demo-workflow.jpg)
 
@@ -59,7 +61,9 @@ MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简�
 
 ![合成输出与导出按钮](./docs/screenshots/demo-export.jpg)
 
-这些画面取自一个 `completed` 状态的项目，所以一致性面板没有漂移红点、也没有展开 CritiquePanel 评分卡——这两处的交互演示需要用一个进行中的项目单独录制，脚本里已标注对应时点。
+![成片画面（沈鸢与阿砚）](./docs/screenshots/demo-generated-frame.jpg)
+
+这些画面取自一个 `completed` 状态的项目，所以一致性面板没有漂移红点、也没有展开 CritiquePanel 评分卡——这两处的交互演示需要用一个进行中的项目单独录制，脚本里已标注对应时点。首页填字后展示的工作台跳转用的是同一个已完成项目（没有真的提交生成、以免消耗额度），所以视频呈现的是「输入 → 已有成果」的流程示意。
 
 ---
 
