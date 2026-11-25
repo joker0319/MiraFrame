@@ -26,7 +26,11 @@ export class ShotRepairService {
     @Inject(ConsistencyService) private readonly consistency: ConsistencyService,
   ) {}
 
-  async repairWithReferences(projectId: number, shotId: number): Promise<RepairShotResult> {
+  async repairWithReferences(
+    projectId: number,
+    shotId: number,
+    options?: { extraPrompt?: string },
+  ): Promise<RepairShotResult> {
     const [shot] = await this.db
       .select()
       .from(schema.shots)
@@ -57,7 +61,10 @@ export class ShotRepairService {
       throw new BadRequestException("这个镜头绑定的角色还没有可用参考图，请先到角色设定补充角色图");
     }
 
-    const prompt = buildRepairPrompt(basePrompt, labels);
+    const prompt = buildRepairPrompt(
+      options?.extraPrompt ? `${basePrompt}\n\n${options.extraPrompt}` : basePrompt,
+      labels,
+    );
     const imageUrl = await this.image.generateImage(prompt, {
       size: "1024x1024",
       referenceImages: references,

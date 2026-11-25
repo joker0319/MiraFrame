@@ -6,7 +6,7 @@ import Redis from "ioredis";
 import { REDIS_CLIENT, REDIS_SUBSCRIBER } from "../redis";
 import { DRIZZLE, type Db } from "../db";
 import { WsGateway } from "../ws";
-import { ImageService, TextService, VideoService, ConsistencyService, ShotRepairService, createImageEnvReader } from "../services";
+import { ImageService, TextService, VideoService, ConsistencyService, ShotRepairService, KeyframeCriticService, createImageEnvReader } from "../services";
 import type { ConsistencyRun } from "../services/consistency";
 import { collectRepairReferences } from "../services/shot-repair.service";
 import { isImageRepairAvailable, planAutoRepair, readAutoRepairConfig, runAutoRepair, worstDistanceOf } from "../services/auto-repair";
@@ -46,6 +46,7 @@ export class AgentProcessor extends WorkerHost {
 	    @Inject(VideoService) private readonly videoService: VideoService,
 	    @Inject(ConsistencyService) private readonly consistencyService: ConsistencyService,
 	    @Inject(ShotRepairService) private readonly shotRepair: ShotRepairService,
+	    @Inject(KeyframeCriticService) private readonly keyframeCritic: KeyframeCriticService,
 	    @Inject(ConfigService) private readonly config: ConfigService,
 	    @Inject(ConversationMemoryService) private readonly memoryService: ConversationMemoryService,
 	  ) {
@@ -548,6 +549,10 @@ export class AgentProcessor extends WorkerHost {
         if (consistency) {
           await this.autoRepairDriftedShots(projectId, consistency);
         }
+
+        // 人脸合格不等于画面合格：手画歪、画风跑偏、构图切头，只有把图喂给
+        // 视觉模型才看得出来。放在修复之后，审的就是最终要拿去生成视频的那版。
+        await this.critiqueKeyframes(projectId);
       },
 
 	      generateShotVideos: async () => {
@@ -946,6 +951,64 @@ export class AgentProcessor extends WorkerHost {
         `repaired=${outcome.repaired.length} unresolved=${unresolved} failed=${outcome.failed.length} ` +
         `skipped=${outcome.skipped.length}`,
     );
+  }
+
+  /**
+   * 关键帧视觉审查：把画面真的交给视觉模型。
+   *
+   * 与 autoCheckConsistency 是互补关系而不是替代：
+   * 人脸比对回答「是不是同一个人」，这里回答「这张图画得对不对」——
+   * 手指数量、肢体结构、画风是否跑偏、构图有没有把主体切掉、画面里有没有乱码文字。
+   *
+   * 和一致性检查一样是增强而非关卡：取图失败、模型返回坏 JSON、重画失败
+   * 都只记日志，绝不阻断后面的生视频。
+   */
+  private async critiqueKeyframes(projectId: number): Promise<void> {
+    try {
+      const result = await this.keyframeCritic.reviewProject(projectId);
+      if (!result || !result.critique) return;
+
+      const { critique, threshold } = result;
+      const passed = critique.score >= threshold;
+
+      this.wsGateway.sendToProject(projectId, "critique_result", {
+        stage: "keyframe",
+        entity_type: "shots",
+        entity_id: null,
+        score: critique.score,
+        threshold,
+        passed,
+        // 视觉审查目前只跑一轮：重画后不再复审，避免「审-改-审」无限花钱
+        round: 1,
+        max_rounds: 1,
+        dimensions: critique.dimensions,
+        issues: critique.issues,
+        suggestions: critique.suggestions,
+        will_regenerate: result.regenerated.length > 0,
+      });
+
+      // 重画改的是库里的图，修复服务不广播，这里补 shot_updated
+      for (const item of result.regenerated) {
+        const [updated] = await this.db
+          .select()
+          .from(schema.shots)
+          .where(eq(schema.shots.id, item.shotId))
+          .limit(1);
+        if (updated) {
+          this.wsGateway.sendToProject(projectId, "shot_updated", { shot: toShotPayload(updated) });
+        }
+      }
+
+      console.log(
+        `[processor] 关键帧视觉审查 project=${projectId} ` +
+          `score=${critique.score.toFixed(1)}/${threshold} ${passed ? "通过" : "未达标"} ` +
+          `reviewed=${result.reviewed.length} batches=${result.batches} ` +
+          `unavailable=${result.unavailable.length} regenerated=${result.regenerated.length} ` +
+          `failed=${result.regenFailed.length} ${result.durationMs}ms`,
+      );
+    } catch (error) {
+      console.warn(`[processor] 关键帧视觉审查跳过 project=${projectId}:`, error);
+    }
   }
 
   private waitForConfirm(projectId: number, runId: number, timeoutMs: number): Promise<boolean> {

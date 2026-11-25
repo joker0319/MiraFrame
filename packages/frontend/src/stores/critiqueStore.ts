@@ -9,6 +9,8 @@ interface CritiqueState {
   latest: CritiqueResultEventData | null;
   /** 按时间正序的历史，用于看「第 1 轮 5.5 分 → 第 2 轮 8.2 分」的收敛过程 */
   history: CritiqueResultEventData[];
+  /** 每个阶段各自最近一次：分镜审查与关键帧视觉审查互不覆盖 */
+  byStage: Record<string, CritiqueResultEventData>;
 
   record: (entry: CritiqueResultEventData) => void;
   reset: () => void;
@@ -17,12 +19,14 @@ interface CritiqueState {
 export const useCritiqueStore = create<CritiqueState>((set) => ({
   latest: null,
   history: [],
+  byStage: {},
 
   record: (entry) =>
     set((state) => ({
       latest: entry,
+      byStage: { ...state.byStage, [entry.stage]: entry },
       history: [...state.history, entry].slice(-HISTORY_LIMIT),
     })),
 
-  reset: () => set({ latest: null, history: [] }),
+  reset: () => set({ latest: null, history: [], byStage: {} }),
 }));

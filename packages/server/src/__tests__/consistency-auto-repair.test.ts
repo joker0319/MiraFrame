@@ -107,6 +107,7 @@ function build(options: {
     {} as never,
     {} as never,
     options.repair as never,
+    {} as never, // KeyframeCriticService：本用例只测人脸漂移修复
     { get: (key: string) => options.values[key] } as never,
     {} as never,
   );

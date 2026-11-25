@@ -7,5 +7,7 @@ export type { FaceDetectResult } from "./face.service";
 export { ConsistencyService } from "./consistency.service";
 export type { ConsistencyInput } from "./consistency.service";
 export { ShotRepairService, collectRepairReferences } from "./shot-repair.service";
+export { KeyframeCriticService } from "./keyframe-critic.service";
+export type { KeyframeReviewResult } from "./keyframe-critic.service";
 export { TtsService } from "./tts.service";
 export { SidecarService } from "./sidecar.service";

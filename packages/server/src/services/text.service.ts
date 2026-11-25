@@ -88,14 +88,63 @@ export class TextService {
     prompt: string,
     options?: { maxTokens?: number; temperature?: number; systemPrompt?: string; intent?: string },
   ): Promise<string> {
+    return this.runRouted<string>({
+      label: "文本",
+      fake: () => this.generateFakeResponse(prompt, options?.intent),
+      noProvider: () => `[LLM not configured] API key not set. Prompt was: ${prompt.substring(0, 100)}...`,
+      attempt: (candidate) => this.attemptGenerate(candidate, prompt, options),
+    });
+  }
+
+  /**
+   * 视觉通道：走同一条 provider 链、同一套熔断，只是 user 消息变成多模态数组。
+   *
+   * images 里每项都是完整的 data URL（`data:image/jpeg;base64,...`）。
+   * 为什么不让调用方传远端 URL：供应商多在自己内网，访问不到本机 `/static/`，
+   * 也不一定能访问别的对象存储，内联成 base64 是唯一稳的形态。
+   * 压缩发生在调用方（KeyframeCriticService），这里只管发。
+   */
+  async generateVision(
+    prompt: string,
+    images: string[],
+    options?: {
+      maxTokens?: number;
+      temperature?: number;
+      systemPrompt?: string;
+      intent?: string;
+      model?: string;
+    },
+  ): Promise<string> {
+    if (images.length === 0) throw new Error("视觉调用至少需要一张图片");
+    return this.runRouted<string>({
+      label: "视觉",
+      fake: () => this.generateFakeResponse(prompt, options?.intent ?? "critique_keyframes"),
+      noProvider: () => `[LLM not configured] API key not set. Prompt was: ${prompt.substring(0, 100)}...`,
+      attempt: (candidate) => this.attemptVision(candidate, prompt, images, options),
+    });
+  }
+
+  /**
+   * 选路循环：fake / 无 key / 逐个尝试 / 错误分类 / 熔断记账 / 聚合错误。
+   * generate 与 generateVision 的差别只在「怎么发请求」，所以把这层提出来，
+   * 避免两处各写一遍熔断逻辑然后慢慢走偏。
+   */
+  private async runRouted<T>(input: {
+    label: string;
+    /** 候选链上命中 fake provider 时走这里 */
+    fake: () => T;
+    /** 链里一家可用的都没有（没配 key）时走这里，保持改造前的占位行为 */
+    noProvider: () => T;
+    attempt: (candidate: ProviderCandidate) => Promise<T>;
+  }): Promise<T> {
     const router = this.getRouter();
     const plan = router.attemptOrder();
 
     // 链里没有任何「配了 key 的非 fake 候选」：沿用改造前的占位行为，
     // 让未配置密钥的本地环境和 fake 演示不受影响。
     if (plan.length === 0) {
-      console.warn("[TextService] 没有可用的 provider（未配置 API key）— 返回占位文本");
-      return `[LLM not configured] API key not set. Prompt was: ${prompt.substring(0, 100)}...`;
+      console.warn(`[TextService] 没有可用的 provider（未配置 API key）— ${input.label}调用返回占位内容`);
+      return input.noProvider();
     }
 
     const failures: Array<{ name: string; message: string }> = [];
@@ -105,22 +154,22 @@ export class TextService {
       if (candidate.provider === "fake") {
         this.announceFallback(plan, index);
         router.recordSuccess(candidate.name, 0);
-        return this.generateFakeResponse(prompt, options?.intent);
+        return input.fake();
       }
 
       const startedAt = Date.now();
       try {
-        const text = await this.attemptGenerate(candidate, prompt, options);
+        const value = await input.attempt(candidate);
         router.recordSuccess(candidate.name, Date.now() - startedAt);
         this.announceFallback(plan, index);
-        return text;
+        return value;
       } catch (error) {
         const failure = classifyProviderFailure(error);
         const message = error instanceof Error ? error.message : String(error);
         // 请求本身有问题（400/422 等）：换 provider 只会再错一次，还会污染健康度
         if (!failure.switchable) {
           console.error(
-            `[TextService] ${candidate.name} 拒绝请求（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），不切换：${message}`,
+            `[TextService] ${candidate.name} 拒绝${input.label}请求（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），不切换：${message}`,
           );
           throw error;
         }
@@ -129,7 +178,7 @@ export class TextService {
         const next = plan[index + 1];
         if (next) {
           console.warn(
-            `[TextService] ${candidate.name} 失败（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），` +
+            `[TextService] ${candidate.name} ${input.label}调用失败（${failure.kind}${failure.status ? ` ${failure.status}` : ""}），` +
               `切换到 ${next.candidate.name}：${message.slice(0, 120)}`,
           );
         }
@@ -137,7 +186,7 @@ export class TextService {
     }
 
     throw new Error(
-      `所有文本 provider 均失败（${failures.map((item) => `${item.name}: ${item.message}`).join("；")}）`,
+      `所有${input.label} provider 均失败（${failures.map((item) => `${item.name}: ${item.message}`).join("；")}）`,
     );
   }
 
@@ -156,7 +205,6 @@ export class TextService {
     options?: { maxTokens?: number; temperature?: number; systemPrompt?: string; intent?: string },
   ): Promise<string> {
     const forceTemperature = this.config.get<number>("app.textForceTemperature");
-    const timeoutMs = this.config.get<number>("app.textTimeoutMs") || 300_000;
 
     console.log(`[TextService] provider=${candidate.name}(${candidate.provider}) model=${candidate.model}`);
     console.log(`[TextService] url=${candidate.baseUrl}${candidate.endpoint}`);
@@ -177,6 +225,64 @@ export class TextService {
     } as Record<string, unknown>;
     const reasoningEffort = this.config.get<string>("app.textReasoningEffort");
     if (reasoningEffort) body.reasoning_effort = reasoningEffort;
+
+    return this.postChat(candidate, body);
+  }
+
+  /**
+   * 视觉调用：user 消息从字符串换成 `[{type:"text"}, {type:"image_url"}...]`。
+   *
+   * 两个细节：
+   * - 图片按顺序紧跟文字之后，且提示词里已写明「图 1 = 镜头 #1」，避免模型自行数图；
+   * - reasoning_effort 不传。视觉模型开推理会显著变慢、且中间 token 不便宜，
+   *   这个场景要的是"看图下判断"，不是多步推理。
+   */
+  private async attemptVision(
+    candidate: ProviderCandidate,
+    prompt: string,
+    images: string[],
+    options?: {
+      maxTokens?: number;
+      temperature?: number;
+      systemPrompt?: string;
+      intent?: string;
+      model?: string;
+    },
+  ): Promise<string> {
+    const forceTemperature = this.config.get<number>("app.textForceTemperature");
+    const model = options?.model?.trim() || candidate.model;
+
+    console.log(
+      `[TextService] vision provider=${candidate.name}(${candidate.provider}) model=${model} images=${images.length}`,
+    );
+
+    const body = {
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            options?.systemPrompt ||
+            "You are a strict quality reviewer for AI-generated comic keyframes. Always answer with JSON only.",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+          ],
+        },
+      ],
+      max_tokens: options?.maxTokens || 2048,
+      temperature: forceTemperature ?? options?.temperature ?? 0.2,
+    } as Record<string, unknown>;
+
+    return this.postChat(candidate, body);
+  }
+
+  /** 发请求 + 解析两种常见响应形状。generate / vision / 后续通道共用。 */
+  private async postChat(candidate: ProviderCandidate, body: Record<string, unknown>): Promise<string> {
+    const timeoutMs = this.config.get<number>("app.textTimeoutMs") || 300_000;
 
     console.log(`[TextService] → POST ${candidate.baseUrl}${candidate.endpoint}`);
 
@@ -517,6 +623,29 @@ export class TextService {
       ]
         .filter(Boolean)
         .join("");
+    }
+
+    // 关键帧视觉审查：fake 模式用的是占位图，审也没有信息量。
+    // 直接给一个「通过」的结论，让本地演示能走完整链路、又不会触发无意义的重画。
+    if (normalized.includes("critique_keyframes")) {
+      const orders = [...prompt.matchAll(/镜头 #(\d+)/g)].map((match) => Number(match[1]));
+      const unique = [...new Set(orders)];
+      const dimensions = { consistency: 8, quality: 7.5, style: 8, composition: 7.5 };
+      return JSON.stringify({
+        overall_score: 7.8,
+        dimensions,
+        shots: unique.map((order) => ({
+          order,
+          score: 7.8,
+          dimensions,
+          issues: [],
+          suggestions: [],
+          needs_regenerate: false,
+        })),
+        issues: [],
+        suggestions: [],
+        needs_regenerate: false,
+      });
     }
 
     if (normalized.includes("shot")) {
