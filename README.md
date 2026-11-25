@@ -45,6 +45,32 @@ MiraFrame 是一个面向 AI 漫剧创作的全栈 Agent 项目。它不是简�
 
 ![MiraFrame 生成服务设置](./docs/screenshots/settings.jpg)
 
+### 演示录制
+
+两分钟演示的分镜脚本、讲解要点与截图清单见 [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md)。录制后把下面五张图放进 `docs/screenshots/`，替换这里的占位：
+
+| 画面 | 文件 | 时间点 |
+| ---- | ---- | ------ |
+| 节点流水线 + 实时日志 | `demo-workflow.jpg` | 0:20 |
+| 一致性自动修复 | `demo-repair.jpg` | 1:00 |
+| 两阶段 Critique | `demo-critique.jpg` | 1:20 |
+| 播放器字幕开关 | `demo-subtitle.jpg` | 1:40 |
+| 成片导出 | `demo-export.jpg` | 1:55 |
+
+<!-- 截图补齐后取消注释
+
+![节点流水线与实时日志](./docs/screenshots/demo-workflow.jpg)
+
+![一致性自动修复](./docs/screenshots/demo-repair.jpg)
+
+![两阶段 Critique](./docs/screenshots/demo-critique.jpg)
+
+![播放器字幕开关](./docs/screenshots/demo-subtitle.jpg)
+
+![成片导出](./docs/screenshots/demo-export.jpg)
+
+-->
+
 ---
 
 ## 你可以学到什么

@@ -690,3 +690,13 @@ MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径�
 本机没有 docker，没法实测镜像构建。改用临时目录按 Dockerfile 的拷贝布局重建生产目录做验证：`@miraframe/shared` / `@miraframe/agent` / `@langchain/*` / `@nestjs/common` / face-api / drizzle-orm / bullmq / socket.io 的 ESM `import.meta.resolve` 全部命中 `dist` 或 `.pnpm`，face-api 的模型文件也在软链目标里。
 
 **仍未解决**：镜像里没有 ffmpeg/ffprobe，`TTS_PROVIDER=macos` 依赖的 `say` 在 Linux 上不存在，数据库迁移不自动跑，compose 没传 `env_file` / `ADMIN_TOKEN` / `PUBLIC_BASE_URL`，`static/` 没挂卷。这两项只是把「必挂」变成「还差配置」，**仍然不建议公网部署**。
+
+## 面试准备：测试矩阵、演示脚本与脱稿速记
+
+**补前端组件测试**。`NodeDetail` 10 个用例覆盖大纲/角色/分镜/画面/输出五类节点的空态、确认门、错误翻译、修改面板与灯箱字幕；`useWebSocket` 14 个用例按事件逐个断言 store 落点（run 生命周期、审批门、实体增删改、Critique 分阶段、一致性回执、yolo 自动确认）。前端从 27 升到 51 个，全仓 443。
+
+测试里抓到一个真实 UI bug：镜头画面的 issue 原本写成 `videoIssue(s) ?? (drift ? "角色长相漂移" : null)`，视频还没生成时前者总返回「等待镜头视频」，把漂移提示短路了。改成漂移优先——进度提示不该盖住已经发现的问题。
+
+**演示脚本**。`docs/DEMO_SCRIPT.md` 给出 2 分钟、7 段的分镜表：每段的时间、画面、操作和讲解要点；README 产品截图章节预留五张图的文件名与时间点（注释占位，图没到齐不会破图）。录制重点是人工确认门、一致性自动修复、两阶段 Critique 和字幕开关这些只有本项目才有的东西，不是堆生成结果。
+
+**脱稿速记卡**。`docs/INTERVIEW_CHEATSHEET.md` 把 Q1–Q17 压成「一句话锚点 + 三个关键词」，Q14–Q17 展开讲法层次（旧痛点 → 设计 → 被测试逼出来的取舍 → 边界），另附主动交代的边界清单与代码定位表。`INTERVIEW_GUIDE.md` 顶部加了入口。

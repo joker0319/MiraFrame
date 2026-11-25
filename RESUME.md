@@ -65,7 +65,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 3. 落地 4 个 `interrupt` 人工门 + DB 持久化等待位置 + Redis 恢复；`target_stage` 阶段续跑配合血缘分析实现增量重生成。
 4. 治理外部依赖：文本 429 串行队列 + `Retry-After`/指数退避，视频 503/队列满分类重试（8 次、封顶 120s）；再补一层跨 provider 选路——候选链切换、连续失败熔断（指数冷却 + half-open 探测）、按错误类型决定是否切换、只读健康端点；供应商差异全部收敛到配置层；曾以最小只读探测定位成本问题并改用免费模型。
 5. 构建一致性闭环：face-api wasm 提速约 23×（41s → 1.8s）→ 镜头图生成后自动校验并落库告警 → 参考图 i2i 反哺修正；6 镜头 / 3 角色项目端到端 1.85s。
-6. 完成成片链路与工程化：逐镜头 macOS TTS 对白配音、原声底噪处理与 `final.srt` 字幕，输出约 34s 成片；台词解析抽到 shared 供前后端复用，播放器按标点断句、按字数分配时长做逐句 DOM 字幕叠加（可开关，导出 mp4 保持干净画面）；pnpm monorepo 四包共享 Zod 契约，419 个测试用例、CI 保障 `build` / `typecheck` / 全量测试通过；BullMQ 并发 8 下用 AsyncLocalStorage 隔离每个 job 的 AgentContext，移除全局兜底，缺上下文显式报错而非静默产出空结果。
+6. 完成成片链路与工程化：逐镜头 macOS TTS 对白配音、原声底噪处理与 `final.srt` 字幕，输出约 34s 成片；台词解析抽到 shared 供前后端复用，播放器按标点断句、按字数分配时长做逐句 DOM 字幕叠加（可开关，导出 mp4 保持干净画面）；pnpm monorepo 四包共享 Zod 契约，443 个测试用例、CI 保障 `build` / `typecheck` / 全量测试通过；BullMQ 并发 8 下用 AsyncLocalStorage 隔离每个 job 的 AgentContext，移除全局兜底，缺上下文显式报错而非静默产出空结果。
 
 ---
 
@@ -97,7 +97,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 | 数据 | 口径 / 出处 |
 | --- | --- |
 | 66 个提交、4 个包、204 个 TS/TSX 文件 | `git rev-list --count HEAD`；含 36 个测试文件，非测试 168 个 |
-| 419 个测试用例 / 37 个测试文件（shared 79 / agent 92 / server 221 / frontend 27）；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个、并发隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个、provider 选路 34 个、i2i 自动修复 32 个、多模态 Critic 53 个、字幕叠加 25 个、WS 地址解析 4 个；`INTERVIEW_GUIDE.md` §0 |
+| 443 个测试用例 / 39 个测试文件（shared 79 / agent 92 / server 221 / frontend 51）；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个、并发隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个、provider 选路 34 个、i2i 自动修复 32 个、多模态 Critic 53 个、字幕叠加 25 个、WS 地址解析 4 个、前端组件与事件矩阵 24 个；`INTERVIEW_GUIDE.md` §0 |
 | 6 个生产阶段、4 个人工门、30 类 WS 事件、16 个 stage 定义 | `shared/src/constants/{events,stages}.ts`、`agent/src/nodes/index.ts` |
 | face-api 9 张图 41s → 1.8s（约 23×） | wasm 后端 + 模型单例缓存，`face.service.ts` |
 | 一致性端到端 1.85s（6 镜头 / 3 角色） | project-23，`GET /consistency?refresh=1` |
