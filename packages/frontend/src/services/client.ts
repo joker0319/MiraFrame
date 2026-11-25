@@ -8,28 +8,51 @@ import { ApiError } from "./errors";
 // ---------------------------------------------------------------------------
 const DEV_BACKEND_PORT = "3000";
 
-function getApiBase(): string {
-  // 1. Explicit env var takes priority
+export interface ApiBaseEnv {
+  VITE_API_URL?: string;
+  DEV?: boolean;
+}
+
+/**
+ * 纯解析函数：环境与 location 由调用方注入，API 与 WS 共用同一套规则。
+ * 抽出来的主要目的是让「HTTPS 同源」这类部署形态能被直接测试。
+ */
+export function resolveApiBase(
+  location: { href: string; origin: string } | undefined,
+  env: ApiBaseEnv,
+): string {
+  // 1. 显式配置优先
+  if (env.VITE_API_URL) return env.VITE_API_URL;
+
+  if (location) {
+    // 2. 开发环境：页面同源换成后端端口
+    if (env.DEV) {
+      const url = new URL(location.href);
+      return `${url.protocol}//${url.hostname}:${DEV_BACKEND_PORT}`;
+    }
+    // 3. 生产环境：完全同源，走 nginx 的 /api/ 与 /ws/
+    return location.origin;
+  }
+
+  // 4. SSR / 无 window
+  return `http://localhost:${DEV_BACKEND_PORT}`;
+}
+
+export function getApiBase(): string {
+  let env: ApiBaseEnv = {};
   try {
-    if (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_URL) {
-      return (import.meta as any).env.VITE_API_URL as string;
+    if (typeof import.meta !== "undefined") {
+      env = {
+        VITE_API_URL: (import.meta as any).env?.VITE_API_URL as string | undefined,
+        DEV: ((import.meta as any)?.env?.DEV ?? false) as boolean,
+      };
     }
   } catch { /* SSR / non-Vite */ }
 
-  // 2. Dev mode - use page origin, replacing port with backend port
-  if (typeof window !== "undefined") {
-    try {
-      if ((import.meta as any)?.env?.DEV ?? false) {
-        const url = new URL(window.location.href);
-        return `${url.protocol}//${url.hostname}:${DEV_BACKEND_PORT}`;
-      }
-    } catch { /* ignore */ }
-    // 3. Production / fallback - same origin
-    return window.location.origin;
-  }
-
-  // 4. SSR / no window - localhost fallback
-  return `http://localhost:${DEV_BACKEND_PORT}`;
+  return resolveApiBase(
+    typeof window === "undefined" ? undefined : window.location,
+    env,
+  );
 }
 
 // Resolve once at module load

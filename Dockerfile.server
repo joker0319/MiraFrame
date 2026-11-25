@@ -22,11 +22,25 @@ RUN pnpm --filter @miraframe/server build
 # Production image
 FROM node:22-alpine AS production
 WORKDIR /app
-COPY --from=base /app/node_modules/.pnpm ./node_modules/.pnpm
+# pnpm 用相对软链组织依赖，软链入口分布在顶层与各包 node_modules；
+# 只拷 .pnpm 会丢掉这些入口，dist 的 bare import 与 face-api 模型路径都会解析失败。
+COPY --from=base /app/node_modules ./node_modules
+# 关键：运行时的 bare import 软链在各包自己的 node_modules 里（顶层只有 dev 工具），
+# 漏拷这三层同样会 MODULE_NOT_FOUND。
+COPY --from=base /app/packages/shared/node_modules ./packages/shared/node_modules
+COPY --from=base /app/packages/agent/node_modules ./packages/agent/node_modules
+COPY --from=base /app/packages/server/node_modules ./packages/server/node_modules
+COPY --from=base /app/pnpm-workspace.yaml ./
+COPY --from=base /app/packages/shared/package.json ./packages/shared/
+COPY --from=base /app/packages/agent/package.json ./packages/agent/
+COPY --from=base /app/packages/server/package.json ./packages/server/
 COPY --from=base /app/packages/shared/dist ./packages/shared/dist
 COPY --from=base /app/packages/agent/dist ./packages/agent/dist
 COPY --from=base /app/packages/server/dist ./packages/server/dist
-COPY --from=base /app/packages/server/package.json ./packages/server/
+
+# workspace 包在源码态把 main/exports 指向 src/*.ts（供 tsx 开发期直跑），
+# 而生产镜像里没有 src，必须改指 dist，否则 dist 里的 bare import 依然解析失败。
+RUN node -e 'const fs=require("fs");for(const n of ["shared","agent"]){const f=`./packages/${n}/package.json`;const p=JSON.parse(fs.readFileSync(f,"utf8"));p.main="./dist/index.js";p.types="./dist/index.d.ts";p.exports={".":{types:"./dist/index.d.ts",default:"./dist/index.js"}};fs.writeFileSync(f,JSON.stringify(p,null,2)+"\n")}'
 
 EXPOSE 3000
 

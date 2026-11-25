@@ -9,6 +9,7 @@ import { useCritiqueStore } from "@/stores/critiqueStore";
 import { useMessageStore } from "@/stores/messageStore";
 import { useProjectStore } from "@/stores/projectStore";
 import { resolveEventStage } from "@/utils/workflowStage";
+import { getApiBase } from "@/services/client";
 import type { AgentMessage, ShotConsistencyResult, WorkflowStage } from "@/types";
 
 // ---- Module-level state (shared across hook instances) ----
@@ -19,12 +20,6 @@ function generateMessageId(): string {
   messageIdCounter++;
   return `msg_${Date.now()}_${messageIdCounter}`;
 }
-
-function getWsBase(): string {
-  if (typeof window === "undefined") return "http://localhost:3000";
-  return `http://${window.location.hostname}:3000`;
-}
-
 
 const TRANSIENT_MESSAGE_PATTERNS = [
   /^正在生成视频\s+\d+\/\d+/,
@@ -379,8 +374,9 @@ export function useWebSocket(projectId: number | null) {
 
     // Create new socket if needed
     if (!socket || !socket.connected) {
-      const wsBase = getWsBase();
-      socket = io(`${wsBase}/ws/projects`, {
+      // 与 API 共用同一 base：生产同源走 nginx 的 /ws/，HTTPS 下不会被 mixed content 拦；
+      // 开发环境仍直连 3000，显式配置 VITE_API_URL 时同理。
+      socket = io(`${getApiBase()}/ws/projects`, {
         transports: ["websocket", "polling"],
         reconnection: true,
         reconnectionDelay: 3000,
