@@ -48,7 +48,7 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 
 > 适合大多数情况。4 条分别对应「决策 → 执行 → 保障 → 质量」，正好是一条完整故事线。前 4 条必选，第 5 条按岗位选加。
 
-1. **重构生成架构**：基于 LangGraph.js 将固定阶段流水线改造为「workflow 骨架 + 模型决策节点」混合架构；Director Agent 依据题材生成阶段计划，通过阶段白名单、必需阶段补齐与顺序重排约束模型裁量权，非法输出自动回退全链路；Critic Agent 以四维 rubric 实现 LLM-as-Judge，未达标带意见打回重写，并设轮次上限与人工审批兜底；评审结论（总分/阈值/轮次/四维得分/问题建议）经 WS 实时下发，前端渲染评分卡片，Judge 过程可见可回溯。
+1. **重构生成架构**：基于 LangGraph.js 将固定阶段流水线改造为「workflow 骨架 + 模型决策节点」混合架构；Director Agent 依据题材生成阶段计划，通过阶段白名单、必需阶段补齐与顺序重排约束模型裁量权，非法输出自动回退全链路；Critic Agent 以四维 rubric 实现 LLM-as-Judge，未达标带意见打回重写，并设轮次上限与人工审批兜底；评审结论（总分/阈值/轮次/四维得分/问题建议）经 WS 实时下发，前端渲染评分卡片，Judge 过程可见可回溯；另加视觉 Critic 补文本审不到的洞——镜头图压至长边 768 内联、一次 4 张批量送审（6 镜仅 2 次调用），逐镜打分并检出画风跑偏/肢体畸形/构图切头，仅在模型明确要求且低于阈值时按参考图重画。
 2. **实现可恢复的 Human-in-the-Loop**：落地 4 个 `interrupt` 人工确认门，门位置持久化至 PostgreSQL、经 Redis 消息恢复；设计 `target_stage` 阶段续跑，配合 `shots.characterIds` 血缘影响面分析只标脏受影响镜头，复用已生成素材，避免整条链路重跑。
 3. **收敛多供应商失败恢复**：重试与选路分两层——单 provider 内文本 429 走进程级串行队列 + `Retry-After` 优先 / 指数退避兜底，视频 503、`queue_full`、429 归为可重试并封顶 120s 退避；跨 provider 按候选链（`TEXT_PROVIDERS=agnes,kimi`）切换，连续失败 3 次熔断并指数冷却、到期 half-open 探测，401/403/429/5xx 才切、400 不切也不计熔断，`GET /api/v1/providers` 暴露成功率/延迟/冷却状态；6 镜头项目失败镜头经续跑补齐，无需从头生成。
 4. **搭建角色一致性质量闭环**：以 face-api wasm 后端 + 贪心指派（阈值 0.45 / 0.6）在镜头图生成后自动校验，结果落库并在工作台告警；检出漂移后自动按绑定角色的参考图走图生图重画并复检，配合开关、单轮预算（默认 2 镜）、图像服务可用性闸门与「`unverifiable` 不算修好」的复检口径，把「检测 → 修复 → 复检」闭成环。9 张图检测耗时由 41s 降至 1.8s（约 23×），i2i 对照使人脸距离由约 0.4 降至 0.22。
@@ -61,11 +61,11 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 在版本 B 基础上把「保障」和「质量」拆开，并补上成片链路与工程规模：
 
 1. 基于 LangGraph.js 重构 6 阶段生成流水线为「workflow 骨架 + 模型决策节点」架构，Director 受白名单与必需阶段约束地产出 `executionPlan` 与可回溯的 `planRationale`。
-2. 实现 Critic LLM-as-Judge 闭环：四维 rubric 评分、未达标将 issues/suggestions 回灌下一轮生成、轮次上限防死循环、模型异常降级人工审批；评分与打回原因经 WS 实时下发到前端评分卡片。
+2. 实现双路 Critic 质量闭环：文本路按四维 rubric 评分、未达标将 issues/suggestions 回灌下一轮生成、轮次上限防死循环、模型异常降级人工审批；视觉路把关键帧压至 768/JPEG 后多图批量送审（4 张/次）、逐镜返回四维分与问题清单，`needs_regenerate` 且低于阈值时按角色参考图重画并把建议拼回提示词；两路评分均经 WS 下发，前端按 `stage` 分卡片展示。
 3. 落地 4 个 `interrupt` 人工门 + DB 持久化等待位置 + Redis 恢复；`target_stage` 阶段续跑配合血缘分析实现增量重生成。
 4. 治理外部依赖：文本 429 串行队列 + `Retry-After`/指数退避，视频 503/队列满分类重试（8 次、封顶 120s）；再补一层跨 provider 选路——候选链切换、连续失败熔断（指数冷却 + half-open 探测）、按错误类型决定是否切换、只读健康端点；供应商差异全部收敛到配置层；曾以最小只读探测定位成本问题并改用免费模型。
 5. 构建一致性闭环：face-api wasm 提速约 23×（41s → 1.8s）→ 镜头图生成后自动校验并落库告警 → 参考图 i2i 反哺修正；6 镜头 / 3 角色项目端到端 1.85s。
-6. 完成成片链路与工程化：逐镜头 macOS TTS 对白配音、原声底噪处理与 `final.srt` 字幕，输出约 34s 成片；pnpm monorepo 四包共享 Zod 契约，334 个测试用例、CI 保障 `build` / `typecheck` / 全量测试通过；BullMQ 并发 8 下用 AsyncLocalStorage 隔离每个 job 的 AgentContext，移除全局兜底，缺上下文显式报错而非静默产出空结果。
+6. 完成成片链路与工程化：逐镜头 macOS TTS 对白配音、原声底噪处理与 `final.srt` 字幕，输出约 34s 成片；pnpm monorepo 四包共享 Zod 契约，390 个测试用例、CI 保障 `build` / `typecheck` / 全量测试通过；BullMQ 并发 8 下用 AsyncLocalStorage 隔离每个 job 的 AgentContext，移除全局兜底，缺上下文显式报错而非静默产出空结果。
 
 ---
 
@@ -96,13 +96,14 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 
 | 数据 | 口径 / 出处 |
 | --- | --- |
-| 62 个提交、4 个包、194 个 TS/TSX 文件 | `git rev-list --count HEAD`；含 31 个测试文件，非测试 163 个 |
-| 334 个测试用例 / 31 个测试文件；后端 168 全过；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个、并发隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个、provider 选路 34 个、i2i 自动修复 32 个；`INTERVIEW_GUIDE.md` §0 |
+| 64 个提交、4 个包、200 个 TS/TSX 文件 | `git rev-list --count HEAD`；含 34 个测试文件，非测试 166 个 |
+| 390 个测试用例 / 34 个测试文件；后端 221 全过；`pnpm build` / `pnpm typecheck` 通过 | 各包 `__tests__/`，含 P0 加固 18 个、并发隔离 4 个、工具层与 MCP 44 个、滚动摘要 30 个、provider 选路 34 个、i2i 自动修复 32 个、多模态 Critic 53 个；`INTERVIEW_GUIDE.md` §0 |
 | 6 个生产阶段、4 个人工门、29 类 WS 事件、16 个 stage 定义 | `shared/src/constants/{events,stages}.ts`、`agent/src/nodes/index.ts` |
 | face-api 9 张图 41s → 1.8s（约 23×） | wasm 后端 + 模型单例缓存，`face.service.ts` |
 | 一致性端到端 1.85s（6 镜头 / 3 角色） | project-23，`GET /consistency?refresh=1` |
 | 人脸距离约 0.4 → 0.22；临时项目实测 0.2562 / `ok` | i2i 反哺对照，`shot-repair.service.ts` |
 | 自动修复：漂移镜头重画后复检 `ok`，请求体带 `extra_body.image`，视频清空待重生成 | 本地真实 HTTP 图生图端到端（`auto-repair` 编排 + `shot-repair` 服务） |
+| 视觉 Critic：单请求 4 张图、单张压到 18–100KB、逐镜分与问题清单可解析 | 本地真实 HTTP 视觉服务端到端，请求体为 `text + image_url×N`，`VISION_MODEL` 覆盖生效 |
 | 阈值 0.45 / 0.6；重试 8 次、退避封顶 120s | `consistency.ts`、`.env` `VIDEO_MAX_RETRIES` |
 | 6 镜头成片约 34s、4/6 镜头含对白配音，输出 `final.srt` | 配音后成片；mean −24.9dB / peak −8.1dB |
 
@@ -168,10 +169,10 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 
 ## 7. 诚实红线（写了就是给自己挖坑）
 
-- **没做的**：独立意图分类器、图像/视频多模态 Critic、按成本/延迟加权的动态选路（当前是静态优先级 + 熔断）、字幕烧录。（checkpoint 持久化已在 P1-1 补齐，MCP 已在 P1-3 接入，CI 已在 P0 补齐，provider 熔断降级已在 P2 补齐。）
+- **没做的**：独立意图分类器、视频多模态 Critic（图像已做，视频要抽帧，成本和时延另算）、按成本/延迟加权的动态选路（当前是静态优先级 + 熔断）、字幕烧录。（checkpoint 持久化已在 P1-1 补齐，MCP 已在 P1-3 接入，CI 已在 P0 补齐，provider 熔断降级与图像多模态 Critic 已在 P2 补齐。）
 - **半成品**：工具层目前只有大纲节点接入（MCP 工具也挂在那里），其余阶段仍是硬编码 `AgentContext` 方法；MCP 只挂了素材库一个 server；长期记忆是单段滚动摘要，没有向量检索、不跨项目复用；熔断状态在进程内，多实例部署时各算各的。
 - **配置口径**：Critic 阈值统一为 `CRITIC_SCORE_THRESHOLD=6.0`（由 `agents/critic.ts` 读取），不再有 `CRITIQUE_*` 双前缀；启动期会校验数值合法性并告警。
-- **原型局限**：免费模型 + 本地 PostgreSQL/Redis；face-api 对半透明、背影、非人形参考图检不出脸；i2i 修正手动触发且会清空该镜视频。
+- **原型局限**：免费模型 + 本地 PostgreSQL/Redis；face-api 对半透明、背影、非人形参考图检不出脸；视觉 Critic 复用文本 provider 链只换 `VISION_MODEL`，环境里配纯文本模型时会 400；视觉判定是主观的，只跑一轮不自我复审。
 - **成本教训**：早期一次探测误用付费模型产生约 ¥17–27 费用，之后把 provider 全量配置化并定下「探测只读、最小单任务」规则 —— 这段适合口述，不适合写进简历。
 
 > 主动交代边界比被问出来强。简历负责「让人想问」，[INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md) 负责「问了答得上」。

@@ -3,7 +3,7 @@
 > 数据截至 2026-11-24，代码基线 `82ae3d4`（42 个提交）。
 > 配套：[RESUME.md](./RESUME.md)（简历写法）、[INTERVIEW_GUIDE.md](./INTERVIEW_GUIDE.md)（面试口述）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）。
 > 工期单位沿用 `multi-agent-upgrade-plan.md` 的「晚」（每天 2–3 小时）。
-> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理、P1-3 工具层/MCP 也已完成**，下方各节保留为实施记录与验收依据。**更新 2026-11-25：P2 的滚动摘要、provider 选路/降级、i2i 自动联动已完成**；剩余待办是 P1-5（前端测试扩充，已从 4 个加到 10 个）与 P2 的多模态 Critic、字幕烧录。
+> **更新 2026-11-24：P0 已全部实施完毕**（安全收口、配置治理、工程卫生、最小 CI），**P1-1 checkpoint 持久化、P1-2 critique 可视化、P1-4 并发上下文治理、P1-3 工具层/MCP 也已完成**，下方各节保留为实施记录与验收依据。**更新 2026-11-25：P2 的滚动摘要、provider 选路/降级、i2i 自动联动、多模态 Critic 已完成**；剩余待办是 P1-5（前端测试扩充，已从 4 个加到 13 个）与字幕烧录。
 
 ---
 
@@ -15,7 +15,7 @@
 
 1. **文档与代码不一致**：`multi-agent-upgrade-plan.md` 是 2026-10-28 的裁定稿，其 §1.2 九条差距里大部分已经实现或半实现，照着它讲会讲错。
 2. **配置与安全裸奔**：运行时配置接口无鉴权、可明文取密钥、CORS 全开；`.env` 有死配置和重复项；Critic 阈值存在两套前缀且配的那个不生效。
-3. **技术债正好压在考点上**：checkpoint 非持久、`critique_result` 定义了不 emit、MCP 没接、图像 rubric 定义了不调用 —— 这几个恰好是「多轮记忆 / Monitor 闭环 / 工具调用 / LLM-as-Judge」四个考点的最短板。
+3. **技术债正好压在考点上**：checkpoint 非持久、`critique_result` 定义了不 emit、MCP 没接、图像 rubric 定义了不调用 —— 这几个恰好是「多轮记忆 / Monitor 闭环 / 工具调用 / LLM-as-Judge」四个考点的最短板（这四项已在 P1/P2 中逐个补齐）。
 
 所以优先级是：**P0 先把口径和安全收干净 → P1 挑两三条把技术债直接转成简历亮点 → P2 才谈技术深度。**
 
@@ -50,7 +50,7 @@
 
 ### 面试指南「诚实边界」复核
 
-`INTERVIEW_GUIDE.md` §5 的八条里，**三条仍成立**（图像 rubric 未调用、宇宙文件残留、字幕外挂）；checkpoint 持久化、`critique_result` 下发、MCP 接入、i2i 自动联动已在 P1/P2 中补齐。
+`INTERVIEW_GUIDE.md` §5 的八条里，**只剩一条仍成立**（字幕外挂）；checkpoint 持久化、`critique_result` 下发、MCP 接入、i2i 自动联动、图像 rubric 接入已在 P1/P2 中逐个补齐。
 
 **一条需要修正**：原文写「`.env` 里 5 行 `DOUBAO_*` 配置已无代码消费」不准确 —— `config/app.config.ts:101-106` 读入 6 个字段，`video.service.ts:36,40,75,85,86` 把 `doubaoApiKey`/`doubaoVideoModel` 当作兜底值、`doubaoVideoDuration`/`doubaoVideoRatio` 当作默认参数消费；准确说法是「作为 legacy 兜底被读取，但没有独立 doubao provider 分支」。`DOUBAO_GENERATE_AUDIO` 确实无人消费。本轮已同步修正该文档。
 
@@ -149,7 +149,7 @@
 
 | 项 | 动机 | 落地点 | 验收 |
 | --- | --- | --- | --- |
-| **多模态 Critic** | `prompts/critic.ts:1-15` 的 `CRITIC_SYSTEM_PROMPT`（图像四维 rubric）定义了却从未调用；让模型直接看镜头图打分，并与 face-api 数值结果合并成一条质量结论 | `agents/critic.ts`、`server/src/services/image.service.ts` | 分镜图能产出评分，与一致性结果汇入同一报告 |
+| **多模态 Critic** | **已完成（2026-11-25）**：`KeyframeCriticService` 把镜头图压到长边 768 / JPEG 0.8、内联成 data URL，**一次请求带多张图**（默认 4 张，6 镜项目 2 次调用）交给视觉模型逐张评审；提示词把「图 N = 镜头 #order」写死，避免模型自己数图；结果走 `critique_result`（`stage=keyframe`）复用前端评分卡片；模型明确 `needs_regenerate` **且**分数低于阈值时，按角色参考图重画（预算默认 1 镜，建议拼进提示词）。边界：不审视频、重画后不复审、复用文本 provider 链只换 `VISION_MODEL` | `services/{keyframe-critic,keyframe-critic.service,image-encoder}.ts`、`services/text.service.ts`、`agent/agent.processor.ts` | 关键帧产出四维评分 + 问题清单，`stage=keyframe` 的卡片与分镜审查并列显示（53 个用例 + 本地真实 HTTP 视觉服务端到端） |
 | **provider 选路 / 降级** | **已完成（2026-11-25）**：`provider-routing.ts` 解析候选链（`TEXT_PROVIDERS=agnes,kimi`，scoped 变量覆盖通用值），连续失败熔断 + 指数冷却 + half-open 探测，按错误类型决定是否切换（401/403/429/5xx 切，400/422 不切也不计熔断），`GET /api/v1/providers` 输出只读健康快照。剩余：无成本/延迟加权，熔断状态不跨实例 | `services/provider-routing.ts`、`services/{text,image,video}.service.ts`、`modules/config/providers.controller.ts` | 主 provider 连续失败自动切备用并记日志（34 个用例 + 本地双 server 端到端验证） |
 | **多轮记忆** | ~~`messages` 只被拼成 contextBlock~~ → **滚动摘要已完成**（2026-11-25）：`conversation-memory.ts` 增量折叠旧轮次、`conversation_memory` 表存摘要与 `coveredThroughId` 游标；剩余 token 预算装配与反馈意图分类 | `agent-run-state.ts`、`agent/conversation-memory*.ts` | 长会话下反馈能跨 5 轮保持连贯，且 prompt 不超预算 |
 | **字幕烧录** | 成片字幕仍是外挂 `final.srt`（`video.service.ts:195-196`），无 `subtitles`/`libass` 滤镜 | `services/video.service.ts` | 输出内嵌中文字幕的 mp4（需处理容器字体） |
