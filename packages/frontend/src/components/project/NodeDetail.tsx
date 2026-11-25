@@ -199,7 +199,8 @@ export function NodeDetail({
               url: playableOrPreviewUrl(s),
               posterUrl: s.image_url || null,
               kind: isPlayableVideoUrl(s.video_url) ? "video" : "image",
-              issue: videoIssue(s) ?? (s.consistency_result?.verdict === "drift" ? "角色长相漂移" : null),
+              // 漂移比「等待镜头视频」更值得先看：后者是进度，前者是已经发现的问题。
+              issue: s.consistency_result?.verdict === "drift" ? "角色长相漂移" : videoIssue(s),
               actionLabel: "重生成视频",
               onAction: () => onSubmitRevision({
                 content: `重新生成镜头 ${s.order} 的视频，保留分镜含义，但优化动作节奏和画面连续性。`,
