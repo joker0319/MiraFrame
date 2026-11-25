@@ -675,3 +675,18 @@ MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径�
 - 全仓 **415 个测试全过**（shared 79 / agent 92 / server 221 / frontend 23），`pnpm -r build` / `pnpm -r typecheck` 通过。
 
 **没做**：导出的 `final.mp4` 不带字幕，字幕只在本站播放器里可见（要带出去得配带 libass 的 ffmpeg 做真烧录，或让下载同时给 `final.srt`）；成片时间轴是按镜头 duration **比例**估算，个别镜头被延长较多时字幕会偏几百毫秒；字幕没有字号/位置自定义，也没做双语或卡拉 OK 逐字高亮。
+
+## 部署止血：WS 同源 + 生产镜像模块解析
+
+**动机**：静态体检发现两处「必然失败」的运行时问题，都不涉及业务逻辑，先修掉。
+
+**WS 地址硬编码**。`useWebSocket.ts` 原来无条件拼 `http://${location.hostname}:3000`：nginx 明明已经反代 `/ws/`，前端却完全绕开；换成 HTTPS 域名后还会被 mixed content 直接拦掉。现在与 API 共用 `client.ts` 的地址解析——显式 `VITE_API_URL` 优先、开发环境换端口 3000、生产用 `window.location.origin`、SSR 回落 localhost。解析逻辑抽成纯函数 `resolveApiBase(location, env)`，环境读取只剩薄薄一层，四种形态都能直接测（新增 4 个用例）。
+
+**Dockerfile 生产镜像**。原来只拷 `.pnpm`，软链入口全丢，`node dist/main.js` 必然 `MODULE_NOT_FOUND`。核查后发现是两层问题：
+
+1. pnpm 的 bare import 软链分布在**各包自己的 `node_modules`**（顶层只有 dev 工具），要把 shared / agent / server 三层的 `node_modules` 一起拷过去；
+2. workspace 包的 `main` / `exports` 在源码态指向 `src/index.ts`（给 tsx 开发期直跑用），而生产镜像只有 `dist` —— 就算软链补齐，bare import 仍会解析到不存在的 `.ts`。生产阶段用一段 Node 脚本把 `main` / `types` / `exports` 改指 `dist/index.js` / `dist/index.d.ts`。tsup 只产出单入口 bundle，`dist/constants`、`dist/types` 都是空目录，所以子路径导出一并收敛成只有 `"."`。
+
+本机没有 docker，没法实测镜像构建。改用临时目录按 Dockerfile 的拷贝布局重建生产目录做验证：`@miraframe/shared` / `@miraframe/agent` / `@langchain/*` / `@nestjs/common` / face-api / drizzle-orm / bullmq / socket.io 的 ESM `import.meta.resolve` 全部命中 `dist` 或 `.pnpm`，face-api 的模型文件也在软链目标里。
+
+**仍未解决**：镜像里没有 ffmpeg/ffprobe，`TTS_PROVIDER=macos` 依赖的 `say` 在 Linux 上不存在，数据库迁移不自动跑，compose 没传 `env_file` / `ADMIN_TOKEN` / `PUBLIC_BASE_URL`，`static/` 没挂卷。这两项只是把「必挂」变成「还差配置」，**仍然不建议公网部署**。
