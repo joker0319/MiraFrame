@@ -48,7 +48,6 @@ function makeState(overrides: Partial<Phase2StateType> = {}): Phase2StateType {
     planRationale: "",
     routeStage: null,
     routeMode: "full",
-    reviewRequested: false,
     ...overrides,
   } as Phase2StateType;
 }

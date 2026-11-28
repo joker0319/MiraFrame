@@ -16,12 +16,37 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import { join } from "node:path";
+import {
+  CreateProjectSchema,
+  FeedbackResponseSchema,
+  FeedbackSchema,
+  ProjectRevisionSchema,
+  RevisionResponseSchema,
+  UpdateProjectSchema,
+  UploadReferenceResponseSchema,
+} from "@miraframe/shared";
+import type {
+  CreateProjectPayload,
+  FeedbackPayload,
+  ProjectRevisionPayload,
+  UpdateProjectPayload,
+} from "@miraframe/shared";
+import { ZodValidationPipe } from "../../common/zod-validation.pipe";
+import { assertContract } from "../../contracts/assert";
 import { DRIZZLE, type Db, schema } from "../../db";
 import { WsGateway } from "../../ws";
 import { eq, desc, asc, inArray } from "drizzle-orm";
 import { AgentService } from "../../agent";
 import { ConsistencyService } from "../../services/consistency.service";
 import { ShotRepairService } from "../../services/shot-repair.service";
+import {
+  toAgentRunDto,
+  toCharacterDto,
+  toMessageDto,
+  toProjectDto,
+  toShotDto,
+} from "../../contracts/dto";
 
 // ---- Projects CRUD ----
 
@@ -37,7 +62,8 @@ export class ProjectsController {
 
   @Get()
   async list() {
-    return this.db.select().from(schema.projects).orderBy(desc(schema.projects.updatedAt));
+    const rows = await this.db.select().from(schema.projects).orderBy(desc(schema.projects.updatedAt));
+    return rows.map(toProjectDto);
   }
 
   @Get(":id")
@@ -47,12 +73,12 @@ export class ProjectsController {
       .from(schema.projects)
       .where(eq(schema.projects.id, parseInt(id)));
     if (!project) return { error: "Not found" };
-    return project;
+    return toProjectDto(project);
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() body: Record<string, unknown>) {
+  async create(@Body(new ZodValidationPipe(CreateProjectSchema)) body: CreateProjectPayload) {
     const [project] = await this.db
       .insert(schema.projects)
       .values({
@@ -71,11 +97,15 @@ export class ProjectsController {
         videoProviderOverride: body.video_provider_override as string,
       })
       .returning();
-    return project;
+    if (!project) throw new Error("创建项目失败");
+    return toProjectDto(project);
   }
 
   @Put(":id")
-  async update(@Param("id") id: string, @Body() body: Record<string, unknown>) {
+  async update(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(UpdateProjectSchema)) body: UpdateProjectPayload,
+  ) {
     const patch: Partial<typeof schema.projects.$inferInsert> = compactUpdate({
       title: body.title as string | undefined,
       story: body.story as string | null | undefined,
@@ -103,7 +133,11 @@ export class ProjectsController {
       .where(eq(schema.projects.id, parseInt(id)))
       .returning();
 
-    this.wsGateway.sendToProject(parseInt(id), "project_updated", project || {});
+    if (project) {
+      const dto = toProjectDto(project);
+      this.wsGateway.sendToProject(parseInt(id), "project_updated", dto);
+      return dto;
+    }
     return project;
   }
 
@@ -129,22 +163,24 @@ export class ProjectsController {
 
   @Get(":id/characters")
   async getCharacters(@Param("id") id: string) {
-    return this.db
+    const rows = await this.db
       .select()
       .from(schema.characters)
       .where(eq(schema.characters.projectId, parseInt(id)))
       .orderBy(asc(schema.characters.id));
+    return rows.map(toCharacterDto);
   }
 
   // ---- Shots under project ----
 
   @Get(":id/shots")
   async getShots(@Param("id") id: string) {
-    return this.db
+    const rows = await this.db
       .select()
       .from(schema.shots)
       .where(eq(schema.shots.projectId, parseInt(id)))
       .orderBy(asc(schema.shots.order));
+    return rows.map(toShotDto);
   }
 
   // ---- 角色一致性校验 ----
@@ -198,13 +234,14 @@ export class ProjectsController {
       throw new BadRequestException("项目或镜头 id 不合法");
     }
     const result = await this.shotRepairService.repairWithReferences(projectId, targetShotId);
-    this.wsGateway.sendToProject(projectId, "shot_updated", {
-      shot: {
-        id: result.shotId,
-        image_url: result.imageUrl,
-        consistency_result: result.after,
-      },
-    });
+    const [updated] = await this.db
+      .select()
+      .from(schema.shots)
+      .where(eq(schema.shots.id, result.shotId))
+      .limit(1);
+    if (updated) {
+      this.wsGateway.sendToProject(projectId, "shot_updated", { shot: toShotDto(updated) });
+    }
     return result;
   }
 
@@ -212,11 +249,12 @@ export class ProjectsController {
 
   @Get(":id/messages")
   async getMessages(@Param("id") id: string) {
-    return this.db
+    const rows = await this.db
       .select()
       .from(schema.messages)
       .where(eq(schema.messages.projectId, parseInt(id)))
       .orderBy(asc(schema.messages.createdAt));
+    return rows.map(toMessageDto);
   }
 
   @Get(":id/runs/latest")
@@ -227,7 +265,7 @@ export class ProjectsController {
       .where(eq(schema.agentRuns.projectId, parseInt(id)))
       .orderBy(desc(schema.agentRuns.createdAt))
       .limit(1);
-    return run || null;
+    return run ? toAgentRunDto(run) : null;
   }
 
   // ---- Outline ----
@@ -259,22 +297,43 @@ export class ProjectsController {
       .where(eq(schema.projects.id, parseInt(id)))
       .returning();
 
-    this.wsGateway.sendToProject(parseInt(id), "outline_updated", {
-      project_id: parseInt(id),
-      story_outline: body,
-      visual_bible: body.visual_bible,
-      outline_approved: body.outline_approved,
-    });
+    if (project) {
+      const dto = toProjectDto(project);
+      this.wsGateway.sendToProject(parseInt(id), "outline_updated", {
+        project_id: parseInt(id),
+        story_outline: dto.story_outline,
+        visual_bible: dto.visual_bible,
+        outline_approved: dto.outline_approved,
+      });
+    }
     return project?.storyOutline || body;
   }
 
   // ---- Upload reference image ----
 
   @Post(":id/upload-reference")
-  @UseInterceptors(FileInterceptor("file"))
-  async uploadReference(@Param("id") id: string, @UploadedFile() file: { filename?: string }) {
-    const baseUrl = process.env.STATIC_BASE_URL || "";
-    const url = `${baseUrl}/static/uploads/${file?.filename || "upload"}`;
+  // 之前没配 storage：multer 默认走内存，file.filename 为空，文件根本没落盘，
+  // 返回的 /static/uploads/upload 必然 404。显式指定磁盘目录后才是可用接口。
+  @UseInterceptors(
+    FileInterceptor("file", {
+      dest: join(process.cwd(), "static/uploads"),
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_req, file, callback) => {
+        if (!file.mimetype?.startsWith("image/")) {
+          callback(new BadRequestException("只允许上传图片文件"), false);
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadReference(
+    @Param("id") id: string,
+    @UploadedFile() file: { filename?: string; originalname?: string; size?: number },
+  ) {
+    if (!file?.filename) throw new BadRequestException("缺少上传文件");
+    const baseUrl = (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+    const url = `${baseUrl}/static/uploads/${file.filename}`;
 
     const [project] = await this.db
       .select({ referenceImages: schema.projects.referenceImages })
@@ -287,13 +346,20 @@ export class ProjectsController {
       .set({ referenceImages: images, updatedAt: new Date() })
       .where(eq(schema.projects.id, parseInt(id)));
 
-    return { url, reference_images: images };
+    return assertContract(
+      UploadReferenceResponseSchema,
+      { url, reference_images: images },
+      "UploadReferenceResponse",
+    );
   }
 
   // ---- Feedback ----
 
   @Post(":id/feedback")
-  async feedback(@Param("id") id: string, @Body() body: Record<string, unknown>) {
+  async feedback(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(FeedbackSchema)) body: FeedbackPayload,
+  ) {
     const projectId = parseInt(id);
     await this.db.insert(schema.messages).values({
       projectId,
@@ -302,14 +368,27 @@ export class ProjectsController {
       content: body.content as string,
       createdAt: new Date(),
     });
-    return { status: "feedback_received" };
+    return assertContract(
+      FeedbackResponseSchema,
+      { status: "feedback_received" },
+      "FeedbackResponse",
+    );
   }
 
   @Post(":id/revisions")
   @HttpCode(HttpStatus.ACCEPTED)
-  async revision(@Param("id") id: string, @Body() body: Record<string, unknown>) {
+  async revision(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(ProjectRevisionSchema)) body: ProjectRevisionPayload,
+  ) {
     const content = String(body.content || "").trim();
-    if (!content) return { status: "ignored", reason: "empty_content" };
+    if (!content) {
+      return assertContract(
+        RevisionResponseSchema,
+        { status: "ignored", reason: "empty_content" },
+        "RevisionResponse",
+      );
+    }
 
     const runId = await this.agentService.submitRevision({
       projectId: parseInt(id),
@@ -319,7 +398,11 @@ export class ProjectsController {
       entityId: typeof body.entity_id === "number" ? body.entity_id : undefined,
     });
 
-    return { status: "revision_queued", run_id: runId };
+    return assertContract(
+      RevisionResponseSchema,
+      { status: "revision_queued", run_id: runId },
+      "RevisionResponse",
+    );
   }
 }
 

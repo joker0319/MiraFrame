@@ -19,9 +19,23 @@ const variantClasses: Record<NonNullable<BadgeProps["variant"]>, string> = {
   warning: "bg-warning-tint text-warning",
 };
 
-export function Badge({ variant = "default", pulse = false, className, children, ...props }: BadgeProps) {
+export function Badge({
+  variant = "default",
+  pulse = false,
+  className,
+  children,
+  ...props
+}: BadgeProps) {
   return (
-    <div className={cn("inline-flex items-center rounded border border-transparent px-2 py-0.5 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary", variantClasses[variant], pulse && "animate-pulse", className)} {...props}>
+    <div
+      className={cn(
+        "inline-flex items-center rounded border border-transparent px-2 py-0.5 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+        variantClasses[variant],
+        pulse && "animate-pulse",
+        className,
+      )}
+      {...props}
+    >
       {children}
     </div>
   );

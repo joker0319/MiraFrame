@@ -108,6 +108,12 @@ export function checkStartupConfig(
   if (parseCorsOrigins(env.CORS_ORIGINS).includes("*")) {
     warnings.push("CORS_ORIGINS 允许任意来源（*）。仅建议在完全隔离的本地环境使用。");
   }
+  if (env.NODE_ENV === "production" && (!env.API_TOKEN || env.API_TOKEN.trim() === "")) {
+    warnings.push("NODE_ENV=production 但未配置 API_TOKEN：HTTP/WS 没有共享口令门。公网部署前请设置。");
+  }
+  if (env.NODE_ENV === "production" && (!env.ADMIN_TOKEN || env.ADMIN_TOKEN.trim() === "")) {
+    warnings.push("NODE_ENV=production 但未配置 ADMIN_TOKEN：运行时配置写入无鉴权。");
+  }
 
   return { warnings, summary };
 }

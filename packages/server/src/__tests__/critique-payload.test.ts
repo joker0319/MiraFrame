@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CritiqueResultEventDataSchema } from "@miraframe/shared";
+import type { CritiqueResultEventData } from "@miraframe/shared";
 import type { CritiqueReport } from "@miraframe/agent";
 import { toCritiqueResultPayload } from "../agent/critique-payload";
 
@@ -36,10 +36,11 @@ describe("toCritiqueResultPayload", () => {
     expect(payload).not.toHaveProperty("willRegenerate");
   });
 
-  it("载荷能通过 shared 的 CritiqueResultEventDataSchema（前后端同一份契约）", () => {
-    const parsed = CritiqueResultEventDataSchema.safeParse(toCritiqueResultPayload(REPORT));
-
-    expect(parsed.success).toBe(true);
+  it("载荷结构由 shared 的 CritiqueResultEventData 在编译期约束", () => {
+    // 这里不跑运行时 schema：payload 的返回类型就是 shared 契约，
+    // 字段拼错/漏字段会直接让 tsc 失败。
+    const payload: CritiqueResultEventData = toCritiqueResultPayload(REPORT);
+    expect(payload.entity_type).toBe("shots");
   });
 
   it("有 entityId 时才带 entity_id，避免发 null 让前端多写一层判空", () => {
@@ -48,11 +49,14 @@ describe("toCritiqueResultPayload", () => {
   });
 
   it("通过时 willRegenerate=false，前端据此显示「已通过」而不是「将重写」", () => {
-    const parsed = CritiqueResultEventDataSchema.parse(
-      toCritiqueResultPayload({ ...REPORT, score: 8.4, passed: true, willRegenerate: false }),
-    );
+    const payload: CritiqueResultEventData = toCritiqueResultPayload({
+      ...REPORT,
+      score: 8.4,
+      passed: true,
+      willRegenerate: false,
+    });
 
-    expect(parsed.passed).toBe(true);
-    expect(parsed.will_regenerate).toBe(false);
+    expect(payload.passed).toBe(true);
+    expect(payload.will_regenerate).toBe(false);
   });
 });

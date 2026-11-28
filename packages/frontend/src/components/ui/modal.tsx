@@ -29,7 +29,10 @@ export function Modal({ isOpen, onClose, children }: ModalProps) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!isOpen) return;
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
       if (e.key !== "Tab") return;
       const focusable = containerRef.current?.querySelectorAll<HTMLElement>(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
@@ -38,9 +41,15 @@ export function Modal({ isOpen, onClose, children }: ModalProps) {
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       if (e.shiftKey) {
-        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
       } else {
-        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     },
     [isOpen, onClose],
@@ -52,9 +61,14 @@ export function Modal({ isOpen, onClose, children }: ModalProps) {
   }, [handleKeyDown]);
 
   useEffect(() => {
-    if (isOpen) { document.body.style.overflow = "hidden"; }
-    else { document.body.style.overflow = ""; }
-    return () => { document.body.style.overflow = ""; };
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -83,8 +97,15 @@ interface ModalHeaderProps {
 
 export function ModalHeader({ title, onClose, className }: ModalHeaderProps) {
   return (
-    <div className={cn("flex items-center justify-between border-b border-line-soft px-6 py-4", className)}>
-      <h2 className="font-serif text-[16px] font-medium leading-none tracking-[-0.01em] text-ink-1">{title}</h2>
+    <div
+      className={cn(
+        "flex items-center justify-between border-b border-line-soft px-6 py-4",
+        className,
+      )}
+    >
+      <h2 className="font-serif text-[16px] font-medium leading-none tracking-[-0.01em] text-ink-1">
+        {title}
+      </h2>
       {onClose && (
         <button
           onClick={onClose}
@@ -114,7 +135,12 @@ interface ModalFooterProps {
 
 export function ModalFooter({ children, className }: ModalFooterProps) {
   return (
-    <div className={cn("flex items-center justify-end gap-2 border-t border-line-soft px-6 py-4", className)}>
+    <div
+      className={cn(
+        "flex items-center justify-end gap-2 border-t border-line-soft px-6 py-4",
+        className,
+      )}
+    >
       {children}
     </div>
   );

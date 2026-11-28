@@ -13,7 +13,7 @@ const FALLBACK_ROUTE: Record<string, string> = {
   shot_images_approval: "render_shot_images",
 };
 
-const VALID_TARGETS = new Set([
+export const VALID_TARGETS = new Set([
   "plan_outline",
   "plan_characters",
   "plan_shots",
@@ -57,7 +57,10 @@ export class ReviewRuleEngine extends BaseAgent {
     let rationale = "按默认规则回退";
 
     try {
-      const userPrompt = REVIEW_ROUTE_USER_PROMPT.replace("{currentStage}", state.currentStage || "")
+      const userPrompt = REVIEW_ROUTE_USER_PROMPT.replace(
+        "{currentStage}",
+        state.currentStage || "",
+      )
         .replace("{feedbackType}", state.feedbackType || "未指定")
         .replace("{feedback}", state.feedback || "无具体反馈");
 
@@ -85,7 +88,6 @@ export class ReviewRuleEngine extends BaseAgent {
       currentStage: "review",
       routeStage: targetStage as Partial<Phase2StateType>["routeStage"],
       routeMode,
-      reviewRequested: false,
     };
   }
 }

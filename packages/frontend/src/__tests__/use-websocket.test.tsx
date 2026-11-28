@@ -211,7 +211,7 @@ describe("useWebSocket 事件落点", () => {
 
     useCharacterStore.getState().setCharacters([makeCharacter()]);
     useShotStore.getState().setShots([makeShot()]);
-    emit("data_cleared", { clearedTypes: ["characters", "shots"] });
+    emit("data_cleared", { cleared_types: ["characters", "shots"] });
     expect(useCharacterStore.getState().characters).toHaveLength(0);
     expect(useShotStore.getState().shots).toHaveLength(0);
   });

@@ -7,8 +7,15 @@ export class PlanAgent extends BaseAgent {
     super("plan");
   }
 
-  async runCharacters(ctx: AgentContext, state: Phase2StateType): Promise<Partial<Phase2StateType>> {
-    await ctx.sendMessage("开始生成角色设计...", { progress: 0.25, isLoading: true, stage: "plan_characters" });
+  async runCharacters(
+    ctx: AgentContext,
+    state: Phase2StateType,
+  ): Promise<Partial<Phase2StateType>> {
+    await ctx.sendMessage("开始生成角色设计...", {
+      progress: 0.25,
+      isLoading: true,
+      stage: "plan_characters",
+    });
     await ctx.sendThinking("planning", "基于故事大纲设计角色...");
 
     const userPrompt = state.feedback
@@ -21,11 +28,10 @@ export class PlanAgent extends BaseAgent {
         ].join("\n")
       : "Design 2-4 main characters for this story. Output ONLY valid JSON.";
 
-    const response = await ctx.callLlm(
-      CHARACTER_SYSTEM_PROMPT,
-      userPrompt,
-      { maxTokens: 4096, intent: "characters" },
-    );
+    const response = await ctx.callLlm(CHARACTER_SYSTEM_PROMPT, userPrompt, {
+      maxTokens: 4096,
+      intent: "characters",
+    });
 
     let characters: Array<{ name: string; description: string }> = [];
     try {
@@ -43,7 +49,7 @@ export class PlanAgent extends BaseAgent {
     const created: string[] = [];
     for (const char of characters) {
       try {
-        const record = await ctx.createCharacter(char);
+        await ctx.createCharacter(char);
         created.push(`${char.name}`);
       } catch (err) {
         console.warn(`[PlanAgent] Failed to create character "${char.name}":`, err);
@@ -60,12 +66,15 @@ export class PlanAgent extends BaseAgent {
       currentStage: "plan_characters",
       nextStage: "characters_approval",
       stageHistory: ["plan_characters"],
-      reviewRequested: false,
     };
   }
 
   async runShots(ctx: AgentContext, state: Phase2StateType): Promise<Partial<Phase2StateType>> {
-    await ctx.sendMessage("开始生成分镜脚本...", { progress: 0.45, isLoading: true, stage: "plan_shots" });
+    await ctx.sendMessage("开始生成分镜脚本...", {
+      progress: 0.45,
+      isLoading: true,
+      stage: "plan_shots",
+    });
     await ctx.sendThinking("planning", "分析叙事节奏，设计镜头语言...");
 
     const userPrompt = state.feedback
@@ -80,11 +89,10 @@ export class PlanAgent extends BaseAgent {
         ].join("\n")
       : "Create 4-8 shot scripts based on the characters and outline. Output ONLY valid JSON.";
 
-    const response = await ctx.callLlm(
-      SHOT_SYSTEM_PROMPT,
-      userPrompt,
-      { maxTokens: 4096, intent: "shots" },
-    );
+    const response = await ctx.callLlm(SHOT_SYSTEM_PROMPT, userPrompt, {
+      maxTokens: 4096,
+      intent: "shots",
+    });
 
     let shots: Array<{
       order: number;
@@ -147,7 +155,6 @@ export class PlanAgent extends BaseAgent {
       currentStage: "plan_shots",
       nextStage: "critique_shots",
       stageHistory: ["plan_shots"],
-      reviewRequested: false,
       // 把本轮生成的分镜文本交给下游 CriticAgent 审查（图状态是节点之间唯一的数据通道）
       artifactText: JSON.stringify(shots, null, 2),
       // 产物血缘从数据库读回，让 state 里的这个字段不再是空转字段
@@ -207,23 +214,27 @@ function normalizeShot(value: unknown): {
 } | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  const description = String(record.description || record.shot_description || record.summary || "").trim();
+  const description = String(
+    record.description || record.shot_description || record.summary || "",
+  ).trim();
   if (!description) return null;
 
-	  return {
-	    order: Number(record.order || record.shot || record.shot_number || 0),
-	    description,
-	    camera: stringOrUndefined(record.camera || record.camera_angle || record.shot_type),
-	    scene: stringOrUndefined(record.scene || record.setting),
-	    action: stringOrUndefined(record.action || record.motion),
-	    dialogue: stringOrUndefined(record.dialogue || record.line),
-	    lighting: stringOrUndefined(record.lighting),
-	    prompt: stringOrUndefined(record.prompt || record.video_prompt),
-	    imagePrompt: stringOrUndefined(record.image_prompt || record.frame_prompt || record.visual_prompt),
-	    duration: numberOrUndefined(record.duration || record.duration_seconds),
-	    motionNote: stringOrUndefined(record.motion_note || record.motion || record.camera_motion),
-	  };
-	}
+  return {
+    order: Number(record.order || record.shot || record.shot_number || 0),
+    description,
+    camera: stringOrUndefined(record.camera || record.camera_angle || record.shot_type),
+    scene: stringOrUndefined(record.scene || record.setting),
+    action: stringOrUndefined(record.action || record.motion),
+    dialogue: stringOrUndefined(record.dialogue || record.line),
+    lighting: stringOrUndefined(record.lighting),
+    prompt: stringOrUndefined(record.prompt || record.video_prompt),
+    imagePrompt: stringOrUndefined(
+      record.image_prompt || record.frame_prompt || record.visual_prompt,
+    ),
+    duration: numberOrUndefined(record.duration || record.duration_seconds),
+    motionNote: stringOrUndefined(record.motion_note || record.motion || record.camera_motion),
+  };
+}
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;

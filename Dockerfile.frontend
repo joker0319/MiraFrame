@@ -10,6 +10,10 @@ RUN pnpm install --frozen-lockfile --prod false
 COPY packages/shared/ packages/shared/
 COPY packages/frontend/ packages/frontend/
 
+# 部署侧可选共享口令；为空时前端不发送 X-API-Token
+ARG VITE_API_TOKEN=
+ENV VITE_API_TOKEN=$VITE_API_TOKEN
+
 RUN pnpm --filter @miraframe/shared build
 RUN pnpm --filter @miraframe/frontend build
 

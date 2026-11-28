@@ -22,13 +22,22 @@ export function Tooltip({ content, children, side = "top", className, delay = 30
     timeoutRef.current = setTimeout(() => setVisible(true), delay);
   };
   const hide = () => {
-    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     setVisible(false);
   };
-  const handleTouch = (e: React.TouchEvent) => { e.stopPropagation(); isTouch.current = true; setVisible(p => !p); };
+  const handleTouch = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    isTouch.current = true;
+    setVisible((p) => !p);
+  };
 
   useEffect(() => {
-    const handleOutside = () => { if (isTouch.current) setVisible(false); };
+    const handleOutside = () => {
+      if (isTouch.current) setVisible(false);
+    };
     document.addEventListener("touchstart", handleOutside);
     return () => document.removeEventListener("touchstart", handleOutside);
   }, []);
@@ -41,10 +50,24 @@ export function Tooltip({ content, children, side = "top", className, delay = 30
   };
 
   return (
-    <div className="relative inline-flex" onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide} onTouchStart={handleTouch}>
+    <div
+      className="relative inline-flex"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+      onTouchStart={handleTouch}
+    >
       {children}
       {visible && (
-        <div role="tooltip" className={cn("absolute z-50 whitespace-nowrap rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md", sideClasses[side], className)}>
+        <div
+          role="tooltip"
+          className={cn(
+            "absolute z-50 whitespace-nowrap rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md",
+            sideClasses[side],
+            className,
+          )}
+        >
           {content}
         </div>
       )}

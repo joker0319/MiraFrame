@@ -2,13 +2,12 @@
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { projectsApi } from "@/services/projectsApi";
-import { styleTemplatesApi } from "@/services/styleTemplatesApi";
 import { cn } from "@/lib/utils";
 import { BRAND } from "@/lib/brand";
 import { ArrowLeft, Check } from "lucide-react";
-import type { CreateProjectPayload, ProjectProviderOverridesPayload } from "@/types";
+import type { CreateProjectPayload } from "@/types";
 
 type ProviderKey = string | null;
 
@@ -60,11 +59,6 @@ export default function NewProjectPage() {
     text_provider_override: null,
     image_provider_override: null,
     video_provider_override: null,
-  });
-
-  const { data: styleTemplates } = useQuery({
-    queryKey: ["style-templates"],
-    queryFn: () => styleTemplatesApi.list(),
   });
 
   const createMutation = useMutation({

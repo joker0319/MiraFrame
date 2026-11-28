@@ -1,6 +1,5 @@
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { ToolRegistry } from "../registry.js";
-import type { AgentTool } from "../types.js";
 import { langChainMcpToolToAgentTool, registerAgentTools } from "./adapter.js";
 import type { AssetsToolkit, AssetsToolkitTuning } from "./assets-toolkit.js";
 

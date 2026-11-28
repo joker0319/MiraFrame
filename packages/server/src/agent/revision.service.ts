@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { DRIZZLE, type Db } from "../db";
 import { schema } from "../db";
 import { analyzeCharacterImpact } from "./lineage";

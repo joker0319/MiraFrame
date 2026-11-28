@@ -4,9 +4,10 @@
 import { fetchApi } from "./client";
 import type {
   Character,
-  CharacterUpdatePayload,
   CharacterBible,
-  AgentRun,
+  CharacterUpdatePayload,
+  ComputeEmbeddingResponse,
+  RegenerateCharacterResponse,
 } from "@/types";
 
 export const charactersApi = {
@@ -22,21 +23,16 @@ export const charactersApi = {
     }),
 
   regenerate: (id: number) =>
-    fetchApi<AgentRun>(`/api/v1/characters/${id}/regenerate`, {
+    fetchApi<RegenerateCharacterResponse>(`/api/v1/characters/${id}/regenerate`, {
       method: "POST",
       body: JSON.stringify({ type: "image" }),
     }),
 
-  delete: (id: number) =>
-    fetchApi<void>(`/api/v1/characters/${id}`, { method: "DELETE" }),
+  delete: (id: number) => fetchApi<void>(`/api/v1/characters/${id}`, { method: "DELETE" }),
 
-  getBible: (id: number) =>
-    fetchApi<CharacterBible>(`/api/v1/characters/${id}/bible`),
+  getBible: (id: number) => fetchApi<CharacterBible>(`/api/v1/characters/${id}/bible`),
 
-  updateBible: (
-    id: number,
-    data: { visual_notes?: string | null; reference_images?: string[] },
-  ) =>
+  updateBible: (id: number, data: { visual_notes?: string | null; reference_images?: string[] }) =>
     fetchApi<CharacterBible>(`/api/v1/characters/${id}/bible`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -54,7 +50,7 @@ export const charactersApi = {
     }),
 
   computeEmbedding: (id: number) =>
-    fetchApi<Character>(`/api/v1/characters/${id}/compute-embedding`, {
+    fetchApi<ComputeEmbeddingResponse>(`/api/v1/characters/${id}/compute-embedding`, {
       method: "POST",
     }),
 };

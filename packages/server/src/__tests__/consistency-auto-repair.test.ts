@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentProcessor } from "../agent/agent.processor";
+import { createPostProcessing } from "../agent/processor/post-processing";
 import type { StoredShotConsistency } from "../services/consistency";
 
 /**
@@ -97,20 +97,14 @@ function build(options: {
   repair: unknown;
   ws: unknown;
 }) {
-  return new AgentProcessor(
-    {} as never,
-    {} as never,
-    options.db as never,
-    options.ws as never,
-    {} as never,
-    {} as never,
-    {} as never,
-    {} as never,
-    options.repair as never,
-    {} as never, // KeyframeCriticService：本用例只测人脸漂移修复
-    { get: (key: string) => options.values[key] } as never,
-    {} as never,
-  );
+  return createPostProcessing({
+    db: options.db as never,
+    wsGateway: options.ws as never,
+    config: { get: (key: string) => options.values[key] } as never,
+    consistencyService: {} as never,
+    shotRepair: options.repair as never,
+    keyframeCritic: {} as never, // 本用例只测人脸漂移修复
+  });
 }
 
 const LIVE_IMAGE = {
@@ -120,12 +114,8 @@ const LIVE_IMAGE = {
   IMAGE_API_KEY: "sk-test",
 };
 
-async function run(processor: AgentProcessor, snap: unknown) {
-  await (
-    processor as unknown as {
-      autoRepairDriftedShots: (projectId: number, snapshot: unknown) => Promise<void>;
-    }
-  ).autoRepairDriftedShots(7, snap);
+async function run(processor: ReturnType<typeof createPostProcessing>, snap: unknown) {
+  await processor.autoRepairDriftedShots(7, snap as never);
 }
 
 describe("AgentProcessor 自动修复编排", () => {

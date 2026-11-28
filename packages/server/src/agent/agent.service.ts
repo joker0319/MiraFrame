@@ -2,7 +2,7 @@ import { Injectable, Inject, OnApplicationBootstrap } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import Redis from "ioredis";
-import { REDIS_CLIENT, REDIS_SUBSCRIBER } from "../redis";
+import { REDIS_CLIENT } from "../redis";
 import { DRIZZLE, type Db } from "../db";
 import { WsGateway } from "../ws";
 import { and, eq, inArray, lt } from "drizzle-orm";
@@ -28,7 +28,6 @@ export class AgentService implements OnApplicationBootstrap {
   constructor(
     @InjectQueue("generation") private readonly generationQueue: Queue,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
-    @Inject(REDIS_SUBSCRIBER) private readonly redisSub: Redis,
     @Inject(DRIZZLE) private readonly db: Db,
     @Inject(WsGateway) private readonly wsGateway: WsGateway,
     private readonly revisionService: RevisionService,
@@ -175,7 +174,7 @@ export class AgentService implements OnApplicationBootstrap {
       role: "assistant",
       content: this.revisionService.formatAcceptedMessage(input, targetStage, assetImpact),
       summary: "修改任务已启动",
-      isLoading: false,
+      is_loading: false,
     });
 
     return runId;

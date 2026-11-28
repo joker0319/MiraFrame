@@ -42,17 +42,19 @@ export function getApiBase(): string {
   let env: ApiBaseEnv = {};
   try {
     if (typeof import.meta !== "undefined") {
+      const meta = import.meta as ImportMeta & {
+        env?: { VITE_API_URL?: string; DEV?: boolean };
+      };
       env = {
-        VITE_API_URL: (import.meta as any).env?.VITE_API_URL as string | undefined,
-        DEV: ((import.meta as any)?.env?.DEV ?? false) as boolean,
+        VITE_API_URL: meta.env?.VITE_API_URL,
+        DEV: meta.env?.DEV ?? false,
       };
     }
-  } catch { /* SSR / non-Vite */ }
+  } catch {
+    /* SSR / non-Vite */
+  }
 
-  return resolveApiBase(
-    typeof window === "undefined" ? undefined : window.location,
-    env,
-  );
+  return resolveApiBase(typeof window === "undefined" ? undefined : window.location, env);
 }
 
 // Resolve once at module load
@@ -60,71 +62,45 @@ const API_BASE = getApiBase();
 const ADMIN_TOKEN_STORAGE_KEY = "miraframe_admin_token";
 const LEGACY_ADMIN_TOKEN_STORAGE_KEY = "openoii_admin_token";
 
-// ---------------------------------------------------------------------------
-// getStaticUrl - safely convert relative /static/... paths to full URLs
-// ---------------------------------------------------------------------------
-export function getStaticUrl(path: string | null | undefined): string | null {
-  if (!path) return null;
-
-  const trimmedPath = path.trim();
-
-  // Already a full HTTP(S) URL - validate protocol
-  if (trimmedPath.startsWith("http://") || trimmedPath.startsWith("https://")) {
-    try {
-      const url = new URL(trimmedPath);
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        console.warn(`[Security] Invalid protocol in URL: ${url.protocol}`);
-        return null;
-      }
-      return trimmedPath;
-    } catch {
-      console.warn(`[Security] Invalid URL format: ${trimmedPath}`);
-      return null;
-    }
+/**
+ * 部署侧共享口令：优先构建期 VITE_API_TOKEN，其次设置面板保存的 admin token。
+ * 未配置时返回 null，后端 API_TOKEN 为空时也完全放行。
+ */
+export function getApiToken(): string | null {
+  try {
+    const envToken = (import.meta as ImportMeta & { env?: { VITE_API_TOKEN?: string } }).env
+      ?.VITE_API_TOKEN;
+    if (envToken && envToken.trim()) return envToken.trim();
+  } catch {
+    /* SSR / non-Vite */
   }
-
-  // Block dangerous protocols
-  const dangerousProtocols = [
-    "javascript:",
-    "data:",
-    "vbscript:",
-    "file:",
-    "about:",
-  ];
-  if (
-    dangerousProtocols.some((proto) =>
-      trimmedPath.toLowerCase().startsWith(proto),
-    )
-  ) {
-    console.warn(`[Security] Dangerous protocol detected: ${trimmedPath}`);
-    return null;
-  }
-
-  // Relative path - prefix with API_BASE
-  return `${API_BASE}${trimmedPath}`;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
 // fetchApi - typed fetch wrapper with structured error handling
 // ---------------------------------------------------------------------------
-export async function fetchApi<T>(
-  endpoint: string,
-  options?: RequestInit,
-): Promise<T> {
+export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   try {
     // Read admin token from localStorage (non-critical - wrap in try/catch)
     let adminToken: string | null = null;
     try {
-      adminToken = localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || localStorage.getItem(LEGACY_ADMIN_TOKEN_STORAGE_KEY);
+      adminToken =
+        localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ||
+        localStorage.getItem(LEGACY_ADMIN_TOKEN_STORAGE_KEY);
       if (!localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) && adminToken) {
         localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, adminToken);
       }
-    } catch { /* localStorage unavailable (SSR / worker env) */ }
+    } catch {
+      /* localStorage unavailable (SSR / worker env) */
+    }
 
+    const apiToken = getApiToken();
     const res = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...(apiToken ? { "X-API-Token": apiToken } : {}),
         ...(adminToken ? { "X-Admin-Token": adminToken } : {}),
         ...options?.headers,
       },
@@ -193,8 +169,5 @@ export async function fetchApi<T>(
 export { projectsApi } from "./projectsApi";
 export { shotsApi } from "./shotsApi";
 export { charactersApi } from "./charactersApi";
-export { versionsApi } from "./versionsApi";
 export { configApi } from "./configApi";
-export { styleTemplatesApi } from "./styleTemplatesApi";
-export { exportApi } from "./exportApi";
 export { consistencyApi } from "./consistencyApi";

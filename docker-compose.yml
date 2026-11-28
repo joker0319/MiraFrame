@@ -33,10 +33,24 @@ services:
       dockerfile: Dockerfile.server
     ports:
       - "3000:3000"
+    # 把 .env 里的模型 Key / ADMIN_TOKEN 等带进容器；
+    # 下面的 environment 会覆盖 DATABASE_URL/REDIS_URL，避免指向宿主机 localhost。
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgres://postgres:${DB_PASSWORD:-postgres}@postgres:5432/miraframe
       REDIS_URL: redis://redis:6379/0
       NODE_ENV: production
+      # 成片 URL 由 PUBLIC_BASE_URL 拼出；默认走 nginx 同源 80，
+      # 由 nginx 的 /static/ 反向代理到本服务。
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      # Linux 容器里没有 macOS 的 say 命令，默认关闭 TTS，避免合成阶段直接失败。
+      # 用独立变量名，避免被宿主机 .env 里的 TTS_PROVIDER=macos 覆盖。
+      TTS_PROVIDER: ${DOCKER_TTS_PROVIDER:-none}
+      # 可选共享口令；设置后 HTTP 与 WS 都必须携带
+      API_TOKEN: ${API_TOKEN:-}
+      # 单实例固定窗口限流；0 = 关闭
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,6 +61,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+      args:
+        # 构建期注入；与 server 的 API_TOKEN 保持一致
+        VITE_API_TOKEN: ${VITE_API_TOKEN:-}
     ports:
       - "80:80"
     depends_on:

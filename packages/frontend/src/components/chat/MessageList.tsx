@@ -13,8 +13,6 @@ interface MessageListProps {
 
 export function MessageList({ messages }: MessageListProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [completedTypewriters, setCompletedTypewriters] = useState<Set<string>>(new Set());
-  const messageFirstSeenRef = useRef<Map<string, number>>(new Map());
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new messages
@@ -42,10 +40,6 @@ export function MessageList({ messages }: MessageListProps) {
       else next.add(id);
       return next;
     });
-  }, []);
-
-  const handleTypewriterComplete = useCallback((id: string) => {
-    setCompletedTypewriters((prev) => new Set(prev).add(id));
   }, []);
 
   const shouldFilterOut = useCallback((msg: AgentMessage): boolean => {
@@ -93,8 +87,19 @@ export function MessageList({ messages }: MessageListProps) {
           return (
             <div key={msg.id || idx} className="flex justify-center">
               <span className="badge badge-sm gap-1">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-3 w-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
+                  />
                 </svg>
                 {msg.content}
               </span>
@@ -123,7 +128,9 @@ export function MessageList({ messages }: MessageListProps) {
                 content={structured.content}
                 tone={structured.tone}
                 icon={structured.icon}
-                onCollapse={msg.id && msg.content.length > 260 ? () => toggleCollapse(msg.id!) : undefined}
+                onCollapse={
+                  msg.id && msg.content.length > 260 ? () => toggleCollapse(msg.id!) : undefined
+                }
               />
             ) : isCollapsed && msg.summary ? (
               <button
@@ -149,14 +156,17 @@ export function MessageList({ messages }: MessageListProps) {
                   (msg.isLoading ? (
                     <TypewriterText
                       text={msg.content}
-                      onComplete={() => msg.id && handleTypewriterComplete(msg.id)}
                       enableAnimation={
                         idx === filtered.length - 1 &&
-                        (msg.isLoading || Date.now() - (msg.timestamp ? new Date(msg.timestamp).getTime() : 0) < 1000)
+                        (msg.isLoading ||
+                          Date.now() - (msg.timestamp ? new Date(msg.timestamp).getTime() : 0) <
+                            1000)
                       }
                     />
                   ) : (
-                    <p className="whitespace-pre-wrap break-words">{cleanMessageContent(msg.content)}</p>
+                    <p className="whitespace-pre-wrap break-words">
+                      {cleanMessageContent(msg.content)}
+                    </p>
                   ))}
 
                 {/* Loading indicator */}
@@ -171,7 +181,6 @@ export function MessageList({ messages }: MessageListProps) {
                     收起
                   </button>
                 )}
-
               </div>
             )}
           </div>
@@ -193,8 +202,19 @@ function ThinkingBubble({ msg }: { msg: AgentMessage }) {
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center gap-2 text-left text-ink-3 transition-colors duration-150 hover:text-ink-1"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-3.5 w-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+          />
         </svg>
         <span>
           {msg.agent} {msg.phase ? `· ${msg.phase}` : "思考中"}
@@ -213,10 +233,7 @@ function ThinkingBubble({ msg }: { msg: AgentMessage }) {
         <div className="mt-2 space-y-1 text-muted-foreground">
           <p>{msg.content}</p>
           {msg.details && <p className="italic">{msg.details}</p>}
-          <button
-            onClick={() => setExpanded(false)}
-            className="text-primary hover:underline mt-1"
-          >
+          <button onClick={() => setExpanded(false)} className="text-primary hover:underline mt-1">
             收起思考
           </button>
         </div>
@@ -234,7 +251,14 @@ type StructuredMessage = {
 };
 
 function getStructuredMessage(msg: AgentMessage): StructuredMessage | null {
-  if (!msg.content || msg.role === "user" || msg.role === "error" || msg.role === "thinking" || msg.isLoading) return null;
+  if (
+    !msg.content ||
+    msg.role === "user" ||
+    msg.role === "error" ||
+    msg.role === "thinking" ||
+    msg.isLoading
+  )
+    return null;
   const content = cleanMessageContent(msg.content);
   const agentName = AGENT_NAME_MAP[msg.agent] || msg.agent;
 
@@ -256,7 +280,10 @@ function getStructuredMessage(msg: AgentMessage): StructuredMessage | null {
       icon: Users,
     };
   }
-  if ((content.includes("分镜") || content.includes("镜头")) && (content.includes("已生成") || msg.agent === "shot")) {
+  if (
+    (content.includes("分镜") || content.includes("镜头")) &&
+    (content.includes("已生成") || msg.agent === "shot")
+  ) {
     return {
       title: agentName === "分镜" ? "分镜脚本已生成" : `${agentName}输出完成`,
       nodeLabel: "分镜节点",
@@ -286,8 +313,10 @@ function StructuredOutputCard({
   const body = content.replace(title, "").trim();
   const accentClass = {
     outline: "bg-primary/[0.05] text-primary shadow-[inset_0_0_0_1px_rgba(140,29,47,0.14)]",
-    characters: "bg-success-tint text-success shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-success)_18%,transparent)]",
-    shots: "bg-warning-tint text-warning shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-warning)_18%,transparent)]",
+    characters:
+      "bg-success-tint text-success shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-success)_18%,transparent)]",
+    shots:
+      "bg-warning-tint text-warning shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-warning)_18%,transparent)]",
     default: "bg-base-200 text-ink-2",
   }[tone];
 
@@ -307,7 +336,9 @@ function StructuredOutputCard({
         </span>
       </div>
       <div className="px-3 py-3">
-        <p className="whitespace-pre-wrap break-words text-[12.5px] leading-6 text-ink-2">{body || content}</p>
+        <p className="whitespace-pre-wrap break-words text-[12.5px] leading-6 text-ink-2">
+          {body || content}
+        </p>
         <div className="mt-3 flex items-center justify-between border-t border-line-soft pt-2">
           <span className="flex items-center gap-1 text-[11px] text-ink-4">
             <Sparkles className="h-3 w-3" strokeWidth={1.8} />
@@ -328,15 +359,7 @@ function cleanMessageContent(content: string): string {
   return content.replace(/\[object Object\]/g, "结构化内容");
 }
 
-function TypewriterText({
-  text,
-  onComplete,
-  enableAnimation,
-}: {
-  text: string;
-  onComplete: () => void;
-  enableAnimation: boolean;
-}) {
+function TypewriterText({ text, enableAnimation }: { text: string; enableAnimation: boolean }) {
   const [displayed, setDisplayed] = useState(enableAnimation ? "" : text);
   const indexRef = useRef(0);
   const completedRef = useRef(false);
@@ -355,12 +378,11 @@ function TypewriterText({
       if (indexRef.current >= text.length) {
         clearInterval(interval);
         completedRef.current = true;
-        onComplete();
       }
     }, 30);
 
     return () => clearInterval(interval);
-  }, [text, enableAnimation, onComplete]);
+  }, [text, enableAnimation]);
 
   return (
     <p className="whitespace-pre-wrap break-words">

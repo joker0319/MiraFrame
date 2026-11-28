@@ -46,16 +46,28 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               <AlertTriangle className="h-8 w-8 text-destructive" />
             </div>
             <h2 className="mb-2 text-xl font-semibold tracking-tight">出错了</h2>
-            <p className="mb-4 text-sm text-muted-foreground">应用遇到了意外错误，请尝试刷新页面。</p>
+            <p className="mb-4 text-sm text-muted-foreground">
+              应用遇到了意外错误，请尝试刷新页面。
+            </p>
             {this.state.error && (
               <details className="mb-4 text-left">
-                <summary className="mb-2 cursor-pointer text-xs font-medium text-muted-foreground">错误详情</summary>
-                <pre className="overflow-auto rounded-md bg-muted p-3 text-xs text-destructive">{this.state.error.message}</pre>
+                <summary className="mb-2 cursor-pointer text-xs font-medium text-muted-foreground">
+                  错误详情
+                </summary>
+                <pre className="overflow-auto rounded-md bg-muted p-3 text-xs text-destructive">
+                  {this.state.error.message}
+                </pre>
               </details>
             )}
             <div className="flex items-center justify-center gap-2">
-              <Button variant="default" onClick={this.handleReset}><RotateCcw className="mr-2 h-4 w-4" />重试</Button>
-              <Button variant="outline" onClick={this.handleReload}><RefreshCw className="mr-2 h-4 w-4" />刷新页面</Button>
+              <Button variant="default" onClick={this.handleReset}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                重试
+              </Button>
+              <Button variant="outline" onClick={this.handleReload}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                刷新页面
+              </Button>
             </div>
           </div>
         </div>

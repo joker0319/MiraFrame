@@ -48,7 +48,6 @@ function mockState(overrides?: Partial<Phase2StateType>): Phase2StateType {
     artifactLineage: {},
     routeStage: null,
     routeMode: "full",
-    reviewRequested: false,
     ...overrides,
   } as Phase2StateType;
 }

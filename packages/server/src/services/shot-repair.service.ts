@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { and, asc, eq } from "drizzle-orm";
 import { DRIZZLE, schema, type Db } from "../db";
 import type { StoredShotConsistency } from "./consistency";
-import { ConsistencyService, type ConsistencyInput } from "./consistency.service";
+import { ConsistencyService } from "./consistency.service";
 import { ImageService } from "./image.service";
 
 export interface RepairShotResult {

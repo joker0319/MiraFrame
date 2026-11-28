@@ -1,6 +1,6 @@
 # MiraFrame 求职速查手册
 
-> 简历写法 + 面试讲法 + 改造进度，三份合一。**数据截至 2026-11-25，基线 `c49fb69`（72 个提交）。**
+> 简历写法 + 面试讲法 + 改造进度，三份合一。**数据截至 2026-11-28，基线 `31fa2c4` + 本轮未提交的契约/校验/瘦身修复（77 个提交）。**
 > 用法：§1 抄简历 → §2 看懂流程 → §3 背讲法 → §4 速查问答 → §7 主动交代边界。
 > 配套：[README.md](./README.md)（项目是什么）、[MODIFICATIONS.md](./MODIFICATIONS.md)（改动流水账）、[考前速记卡](./docs/INTERVIEW_CHEATSHEET.md)、[架构解读](./docs/architecture-walkthrough.md)、[演示脚本](./docs/DEMO_SCRIPT.md)。
 
@@ -36,15 +36,15 @@ MiraFrame 弥镜 | AI 漫剧生成 Agent 工作台 | 2026.09 – 2026.11
 3. **治理供应商失败**：文本 429 串行队列 + `Retry-After` + 指数退避，视频 503/队列满分类重试、封顶 120 秒；再上一层是候选链 + 熔断 + half-open 探测 + 只读健康端点。6 镜头项目原本只出 4 镜，续跑补齐。
 4. **搭建一致性闭环**：face-api wasm 把 9 张图检测从 41 秒降到 1.8 秒（约 23×），距离阈值 0.45 / 0.6 + 贪心指派；漂移镜头自动按角色参考图 i2i 重画并复检，有开关、单轮预算和图像服务可用性闸门，人脸距离约 0.4 → 0.22。
 
-**按岗位调整**：前端岗把「纸墨设计系统 + 29 类 WS 事件消费层 + 长任务可观察交互」提到前两条；Agent 岗把「Director / Critic + 工具层与 MCP + 滚动摘要」放前三；空间不够就用一行版——「基于 LangGraph.js 将固定流水线改造为 Director 规划 + Critic 打回 + 4 个人工门的可恢复多 Agent 系统，实现分类重试、阶段续跑与角色一致性闭环」。
+**按岗位调整**：前端岗把「纸墨设计系统 + 30 类 WS 事件消费层 + 长任务可观察交互」提到前两条；Agent 岗把「Director / Critic + 工具层与 MCP + 滚动摘要」放前三；空间不够就用一行版——「基于 LangGraph.js 将固定流水线改造为 Director 规划 + Critic 打回 + 4 个人工门的可恢复多 Agent 系统，实现分类重试、阶段续跑与角色一致性闭环」。
 
 ### 可引用的数字（挑 3–4 个，不要全堆）
 
 | 数字 | 口径 |
 | --- | --- |
-| 72 个提交 / 4 个包 / 207 个 TS·TSX 文件 / 39 个测试文件 | `git rev-list --count HEAD` 与源码统计 |
-| 443 个测试（shared 79 / agent 92 / server 221 / frontend 51），build 与 typecheck 通过 | 各包 `__tests__/`，CI 保障 |
-| 6 个生产阶段 / 4 个人工门 / 29 类 WS 事件 | `shared/src/constants/{stages,events}.ts` |
+| 77 个提交 / 4 个包 / 227 个 TS·TSX 文件 / 46 个测试文件 | `git rev-list --count HEAD` 与源码统计 |
+| 414 个测试（shared 26 / agent 96 / server 241 / frontend 51），build 与 typecheck 通过 | 各包 `__tests__/`，CI 保障 |
+| 6 个生产阶段 / 4 个人工门 / 30 类 WS 事件 | `shared/src/constants/{stages,events}.ts` |
 | 9 张图 41s → 1.8s（约 23×）；一致性端到端 1.85s（6 镜 / 3 角色） | `face.service.ts`；project-23 |
 | 人脸距离约 0.4 → 0.22；临时项目实测 0.2562 / `ok` | i2i 反哺对照 |
 | 6 镜成片约 34s，4 镜有 TTS 对白，另出 `final.srt` | 本地合成产物 |
@@ -92,7 +92,7 @@ flowchart TD
     subgraph P["贯穿全程的保障层"]
       P1["门状态写 PostgreSQL.awaitingGate"]
       P2["checkpoint 落 PostgreSQL<br/>重启按 thread_id 续跑"]
-      P3["候选链熔断 · 增量标脏 · 29 类 WS 事件"]
+      P3["候选链熔断 · 增量标脏 · 30 类 WS 事件"]
     end
 
     G1 -.-> P1
@@ -107,13 +107,13 @@ flowchart TD
 
 ### 30 秒版
 
-> MiraFrame 是全 TypeScript 的 AI 漫剧生成工作台。我接手时是固定阶段流水线，改造后变成「workflow 骨架 + 模型决策节点」：Director 决定走哪些阶段，Critic 打分、不合格带意见打回，四个关键节点用 `interrupt` 做人工确认。外部模型限流、掉线、坏 JSON 都有降级路径。最后加了人脸一致性闭环：自动校验、漂移告警、按参考图 i2i 修正。全仓 pnpm monorepo，前后端共享 Zod Schema 和 WS 事件类型。
+> MiraFrame 是全 TypeScript 的 AI 漫剧生成工作台。我接手时是固定阶段流水线，改造后变成「workflow 骨架 + 模型决策节点」：Director 决定走哪些阶段，Critic 打分、不合格带意见打回，四个关键节点用 `interrupt` 做人工确认。外部模型限流、掉线、坏 JSON 都有降级路径。最后加了人脸一致性闭环：自动校验、漂移告警、按参考图 i2i 修正。全仓 pnpm monorepo，前后端共享阶段/事件契约（WS 事件名单一来源），启动期配置用 Zod 做校验。
 
 ### 3 分钟版（决策 → 执行 → 保障）
 
 1. **决策层**：Director 产出 `executionPlan` 但受白名单与必需阶段约束；Critic 按四维 rubric 评分，不通过把 issues/suggestions 写回 `feedback`；ReviewAgent 决定用户反馈回流到哪个阶段。
 2. **执行层**：LangGraph 串起 6 个生产节点和 4 个人工门；门位置落 `awaitingGate`，Redis 确认消息唤醒；续跑用 `target_stage` 切入，已完成素材不重生成。
-3. **保障层**：429 串行队列 + Retry-After，503 分类重试封顶 120 秒；再上一层候选链 + 熔断应对密钥失效；一致性用 face-api wasm + 贪心指派，漂移自动 i2i 重画复检；前端经 29 类 WS 事件实时看到进度、门、产物和告警。
+3. **保障层**：429 串行队列 + Retry-After，503 分类重试封顶 120 秒；再上一层候选链 + 熔断应对密钥失效；一致性用 face-api wasm + 贪心指派，漂移自动 i2i 重画复检；前端经 30 类 WS 事件实时看到进度、门、产物和告警。
 
 ### 五个 STAR 案例（挑 2–3 个深讲）
 
@@ -183,7 +183,7 @@ flowchart TD
 | 工具调用 | `ToolRegistry` + `ToolLoop`，与 LangChain `tool()` 互通；MCP 官方 SDK + 自实现兜底 | 只有大纲节点挂了远端工具，MCP 是可选增强 |
 | 多轮记忆 | 消息按轮注入 + 增量滚动摘要；checkpoint 落 PG | 单段摘要，没有向量检索、不跨项目复用 |
 | 多 Agent 路由 | Director 规划 + Review 的 `FALLBACK_ROUTE` | 节点是类，不是独立进程 |
-| Monitor 闭环 | 29 类 WS 事件 + `critique_result` 评分卡片 | 进程内广播，没接 Redis adapter |
+| Monitor 闭环 | 30 类 WS 事件 + `critique_result` 评分卡片 | 进程内广播，没接 Redis adapter |
 | LLM-as-Judge | 文本 Critic + 视觉 Critic，均有阈值、预算、人工兜底 | 不审视频；视觉判定比数值阈值主观 |
 
 > 不要六项都说成「完整实现」。挑 **多 Agent 路由 + LLM-as-Judge + Monitor 闭环** 讲扎实，其余坦诚说下一步补，反而可信。
@@ -195,9 +195,13 @@ flowchart TD
 - **P0 已完成**：配置接口加 `ADMIN_TOKEN` 守卫、CORS 白名单、WS 房间校验；Critic 阈值统一为 `CRITIC_*`；删探针日志、宇宙页面残留、`db:push`；补最小 CI。
 - **P1 已完成**：`PostgresSaver` checkpoint；`critique_result` 实时评分卡片；工具层 + MCP（官方 `@langchain/mcp-adapters@1.0.1`，自实现 stdio 兜底）；ALS 并发隔离；前端测试扩到 6 文件 / 51 用例。
 - **P2 已完成**：增量滚动摘要；provider 候选链 + 熔断；漂移 i2i 自动联动；多模态 Critic；DOM 字幕上屏。
+- **正确性修复（2026-11-28）**：历史消息改为取最近 120 条；补齐 review / 拒绝路由的目的地表；取消改为节点边界与逐镜检查的协作式抢占；大纲反馈改走 revision，不再污染 `story`；stage-only 消息不再把进度写回 0；参考图上传真正落盘；补图级 E2E。
+- **契约收敛（2026-11-28）**：shared 从 UUID/Zod 旧模型改为真实接口契约（整数 ID、snake_case、ISO 时间）；前端只保留 UI 私有类型；服务端新增 DTO 层统一 REST 输出；WS 网关按 shared 事件表做类型约束；shared 补 Zod schema，在 REST 入参、DTO 出站、WS 出站三处运行时校验。
+- **代码瘦身（2026-11-28）**：删除未接入图的 `RenderAgent`、恒为 false 的 `reviewRequested`；processor 拆出 agent-context / post-processing / gate / prompts，主文件 1206 → 424 行；删除未使用的 `agentmessage` 表并生成迁移；清理未使用构造依赖、导入、前端 `getStaticUrl` 与半废弃 typewriter 状态。
+- **部署硬化（2026-11-28）**：可选 `API_TOKEN` 同时保护 HTTP/WS；`VITE_API_TOKEN` 构建期注入；单实例每分钟限流；compose 增加 `env_file` 与限流/Token 配置；命令类响应补 runtime schema。仍不是用户级鉴权。
 - **收益递减的可选项**：`ProjectPage` 加载 / 错误态测试、真实浏览器 E2E、WS Redis adapter、按槽位或向量检索的记忆、按成本/延迟动态选路。
 - **刻意不做**：ffmpeg 字幕烧录——DOM 叠加已解决上屏，烧录不可逆且需要额外字体 / libass 依赖。
-- **部署阻塞**：ffmpeg / ffprobe、`say` 语音、自动迁移、`env_file` / `ADMIN_TOKEN` / `PUBLIC_BASE_URL`、静态卷。当前**不公网部署**。
+- **部署阻塞**：ffmpeg/ffprobe、启动迁移、nginx `/static/`、`env_file`、可选 `API_TOKEN`（HTTP/WS）与单实例限流已补；仍缺用户级鉴权/会话、密钥托管、静态卷与可观测性。容器内无 `say`，默认关 TTS。当前**不公网部署**。
 
 ---
 

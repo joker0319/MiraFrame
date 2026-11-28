@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "dev:fast": "tsx watch src/main.ts",
-    "build": "tsup src/main.ts --format esm --dts --clean --tsconfig tsconfig.build.json",
+    "build": "tsup src/main.ts src/migrate.ts --format esm --dts --clean --tsconfig tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:migrate:runtime": "tsx src/migrate.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.0.0",

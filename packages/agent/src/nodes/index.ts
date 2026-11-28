@@ -88,12 +88,18 @@ export async function planOutlineNode(state: Phase2StateType): Promise<Partial<P
 }
 
 // ── Characters node (generates descriptions + images) ──
-export async function planCharactersNode(state: Phase2StateType): Promise<Partial<Phase2StateType>> {
+export async function planCharactersNode(
+  state: Phase2StateType,
+): Promise<Partial<Phase2StateType>> {
   const ctx = getNodeCtx();
   const result = await planAgent.runCharacters(ctx, state);
 
   // After character descriptions are created, generate character images
-  await ctx.sendMessage("正在生成角色形象图...", { progress: 0.35, isLoading: true, stage: "plan_characters" });
+  await ctx.sendMessage("正在生成角色形象图...", {
+    progress: 0.35,
+    isLoading: true,
+    stage: "plan_characters",
+  });
 
   try {
     await ctx.generateCharacterImage();
@@ -118,21 +124,28 @@ export async function critiqueShotsNode(state: Phase2StateType): Promise<Partial
 }
 
 // ── Render shot images node (preview only, no interrupt) ──
-export async function renderShotImagesNode(state: Phase2StateType): Promise<Partial<Phase2StateType>> {
+export async function renderShotImagesNode(): Promise<Partial<Phase2StateType>> {
   const ctx = getNodeCtx();
-  await ctx.sendMessage("开始生成分镜帧和镜头视频...", { progress: 0.65, isLoading: true, stage: "render_shot_images" });
+  await ctx.sendMessage("开始生成分镜帧和镜头视频...", {
+    progress: 0.65,
+    isLoading: true,
+    stage: "render_shot_images",
+  });
   await ctx.sendThinking("decision", "根据分镜脚本生成首帧画面，并由首帧生成镜头视频...");
 
   await ctx.generateShotFrames();
   await ctx.generateShotVideos();
 
-  await ctx.sendMessage("镜头视频生成完成", { progress: 0.8, summary: "所有镜头视频片段已生成", stage: "render_shot_images" });
+  await ctx.sendMessage("镜头视频生成完成", {
+    progress: 0.8,
+    summary: "所有镜头视频片段已生成",
+    stage: "render_shot_images",
+  });
 
   return {
     currentStage: "render_shot_images",
     nextStage: "compose_videos",
     stageHistory: ["render_shot_images"],
-    reviewRequested: false,
   };
 }
 
@@ -219,7 +232,6 @@ export function routeFromStart(state: Phase2StateType): RouteKey {
  * 恢复 / 指定阶段场景（executionPlan 为空）退回 currentStage，保证 checkpoint 续跑不变。
  */
 export function routeAfterDirector(state: Phase2StateType): RouteKey {
-  if (state.reviewRequested) return "review";
   if (!state.executionPlan || state.executionPlan.length === 0) {
     return state.currentStage || "plan_outline";
   }
@@ -228,19 +240,18 @@ export function routeAfterDirector(state: Phase2StateType): RouteKey {
 }
 
 export function routeAfterOutlineApproval(state: Phase2StateType): RouteKey {
-  if (state.reviewRequested) return "review";
   // If rejected, regenerate outline; if approved, move to the next stage the Director kept
-  return state.approvalHistory?.outline === "approved" ? nextEnabled(state, "plan_outline") : "plan_outline";
+  return state.approvalHistory?.outline === "approved"
+    ? nextEnabled(state, "plan_outline")
+    : "plan_outline";
 }
 
 export function routeAfterCharactersApproval(state: Phase2StateType): RouteKey {
-  if (state.reviewRequested) return "review";
   // 角色阶段被保留时才会走到此门，之后固定进分镜（分镜是必需阶段）
   return state.approvalHistory?.characters === "approved" ? "plan_shots" : "plan_characters";
 }
 
 export function routeAfterShotsApproval(state: Phase2StateType): RouteKey {
-  if (state.reviewRequested) return "review";
   return state.approvalHistory?.shots === "approved" ? "render_shot_images" : "plan_shots";
 }
 
@@ -250,12 +261,10 @@ export function routeAfterShotsApproval(state: Phase2StateType): RouteKey {
  * 这里只负责把状态翻译成图上的目标节点，保持路由函数"纯函数"的简单性。
  */
 export function routeAfterCritique(state: Phase2StateType): RouteKey {
-  if (state.reviewRequested) return "review";
   return state.nextStage === "plan_shots" ? "plan_shots" : "shots_approval";
 }
 
 export function routeAfterShotImagesApproval(state: Phase2StateType): RouteKey {
-  if (state.reviewRequested) return "review";
   return state.approvalHistory?.frames === "approved" ? "compose_videos" : "render_shot_images";
 }
 

@@ -326,7 +326,7 @@ function buildSavePayload(draft: Record<string, string>, itemByKey: Map<string, 
   ) as Record<string, ConfigValue>;
 }
 
-function normalizeConfigValue(key: string, value: string, item?: ConfigItem): string | null | undefined {
+function normalizeConfigValue(_key: string, value: string, item?: ConfigItem): string | null | undefined {
   if (item?.is_sensitive && item.is_masked && value === String(item.value || "")) return undefined;
   if (value.trim() === "") return null;
   return value;

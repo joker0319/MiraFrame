@@ -32,7 +32,6 @@ export const Phase2State = Annotation.Root({
   }),
   routeStage: Annotation<string | null>(),
   routeMode: Annotation<"full" | "incremental">(),
-  reviewRequested: Annotation<boolean>(),
   feedback: Annotation<string | null>(),
   feedbackType: Annotation<string | null>(),
   entityType: Annotation<string | null>(),

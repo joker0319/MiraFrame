@@ -25,14 +25,25 @@ export interface AgentContext {
   projectId: number;
   runId: number;
   threadId: string;
-  sendMessage: (content: string, opts?: { summary?: string; progress?: number; isLoading?: boolean; stage?: string }) => Promise<void>;
-  sendThinking: (phase: "reasoning" | "decision" | "planning" | "reviewing", content: string, details?: string) => Promise<void>;
+  sendMessage: (
+    content: string,
+    opts?: { summary?: string; progress?: number; isLoading?: boolean; stage?: string },
+  ) => Promise<void>;
+  sendThinking: (
+    phase: "reasoning" | "decision" | "planning" | "reviewing",
+    content: string,
+    details?: string,
+  ) => Promise<void>;
   /**
    * 把评审结论推给前端（评分卡片 + 消息流）。
    * 可选：单测和 fake context 不实现时静默跳过，评审本身照常进行。
    */
   reportCritique?: (report: CritiqueReport) => Promise<void>;
-  callLlm: (systemPrompt: string, userPrompt: string, opts?: { maxTokens?: number; intent?: string }) => Promise<string>;
+  callLlm: (
+    systemPrompt: string,
+    userPrompt: string,
+    opts?: { maxTokens?: number; intent?: string },
+  ) => Promise<string>;
   /**
    * 带工具调用能力的模型通道。可选：没有它时 ToolLoop 会自动降级到 JSON 协议，
    * 所以老测试、fake provider 和不支持 function calling 的模型都能照常工作。
@@ -112,12 +123,13 @@ export class BaseAgent {
     opts?: { maxTokens?: number; intent?: string },
   ): Promise<LlmChatResponse> {
     if (!ctx.callLlmWithTools) {
-      throw new Error("当前 AgentContext 未配置 callLlmWithTools，请使用 runToolLoop 的 JSON 降级模式");
+      throw new Error(
+        "当前 AgentContext 未配置 callLlmWithTools，请使用 runToolLoop 的 JSON 降级模式",
+      );
     }
     return ctx.callLlmWithTools(messages, tools, opts);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async run(_ctx: AgentContext, _state: Phase2StateType): Promise<Partial<Phase2StateType>> {
     throw new Error(`Agent ${this.name}.run() not implemented`);
   }

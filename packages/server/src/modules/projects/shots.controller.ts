@@ -13,6 +13,15 @@ import { DRIZZLE, type Db, schema } from "../../db";
 import { WsGateway } from "../../ws";
 import { AgentService } from "../../agent";
 import { eq, asc } from "drizzle-orm";
+import { toShotDto } from "../../contracts/dto";
+import {
+  RegenerateShotRequestSchema,
+  RegenerateShotResponseSchema,
+  ShotUpdateSchema,
+} from "@miraframe/shared";
+import type { RegenerateShotRequest, ShotUpdatePayload } from "@miraframe/shared";
+import { ZodValidationPipe } from "../../common/zod-validation.pipe";
+import { assertContract } from "../../contracts/assert";
 
 @Controller("api/v1/shots")
 export class ShotsController {
@@ -23,7 +32,10 @@ export class ShotsController {
   ) {}
 
   @Put(":id")
-  async update(@Param("id") id: string, @Body() body: Record<string, unknown>) {
+  async update(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(ShotUpdateSchema)) body: ShotUpdatePayload,
+  ) {
     const patch: Partial<typeof schema.shots.$inferInsert> = compactUpdate({
       order: body.order as number | undefined,
       description: body.description as string | undefined,
@@ -50,7 +62,9 @@ export class ShotsController {
       .returning();
 
     if (shot) {
-      this.wsGateway.sendToProject(shot.projectId, "shot_updated", { shot });
+      const dto = toShotDto(shot);
+      this.wsGateway.sendToProject(shot.projectId, "shot_updated", { shot: dto });
+      return dto;
     }
     return shot;
   }
@@ -87,13 +101,18 @@ export class ShotsController {
       .where(eq(schema.shots.id, parseInt(id)))
       .returning();
 
-    this.wsGateway.sendToProject(shot.projectId, "shot_updated", { shot: updated });
-    return updated;
+    if (!updated) return updated;
+    const dto = toShotDto(updated);
+    this.wsGateway.sendToProject(shot.projectId, "shot_updated", { shot: dto });
+    return dto;
   }
 
   @Post(":id/regenerate")
   @HttpCode(HttpStatus.ACCEPTED)
-  async regenerate(@Param("id") id: string, @Body() body: { type?: string }) {
+  async regenerate(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(RegenerateShotRequestSchema)) body: RegenerateShotRequest,
+  ) {
     const shotId = parseInt(id);
     const [shot] = await this.db
       .select({ projectId: schema.shots.projectId, order: schema.shots.order })
@@ -112,13 +131,17 @@ export class ShotsController {
       feedbackType: type === "video" ? "regenerate_video" : "regenerate_image",
     });
 
-    return {
-      status: "queued",
-      shot_id: shotId,
-      project_id: shot.projectId,
-      type,
-      run_id: runId,
-    };
+    return assertContract(
+      RegenerateShotResponseSchema,
+      {
+        status: "queued",
+        shot_id: shotId,
+        project_id: shot.projectId,
+        type,
+        run_id: runId,
+      },
+      "RegenerateShotResponse",
+    );
   }
 
   @Delete(":id")

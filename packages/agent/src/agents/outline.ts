@@ -10,13 +10,18 @@ export class OutlineAgent extends BaseAgent {
   }
 
   async run(ctx: AgentContext, state: Phase2StateType): Promise<Partial<Phase2StateType>> {
-    await this.sendMessage(ctx, "开始生成故事大纲...", { progress: 0.05, isLoading: true, stage: "plan_outline" });
+    await this.sendMessage(ctx, "开始生成故事大纲...", {
+      progress: 0.05,
+      isLoading: true,
+      stage: "plan_outline",
+    });
     await this.sendThinking(ctx, "planning", "分析故事要素：主题、世界观、情感弧线...");
 
     const userPrompt = state.feedback
-      ? OUTLINE_FEEDBACK_PROMPT
-        .replace("{originalOutline}", "请参考项目上下文中的 Approved outline JSON；如果没有原大纲，则根据 Story brief 生成。")
-        .replace("{feedback}", state.feedback)
+      ? OUTLINE_FEEDBACK_PROMPT.replace(
+          "{originalOutline}",
+          "请参考项目上下文中的 Approved outline JSON；如果没有原大纲，则根据 Story brief 生成。",
+        ).replace("{feedback}", state.feedback)
       : "请根据提供的故事创想生成一份详细的故事大纲。必须全部使用中文输出。";
 
     const toolkit = createOutlineToolKit(ctx);
@@ -27,7 +32,9 @@ export class OutlineAgent extends BaseAgent {
     if (assets) {
       for (const tool of assets.tools) {
         if (toolkit.registry.has(tool.definition.name)) {
-          console.warn(`[OutlineAgent] MCP 工具 ${tool.definition.name} 与本地工具重名，保留本地实现`);
+          console.warn(
+            `[OutlineAgent] MCP 工具 ${tool.definition.name} 与本地工具重名，保留本地实现`,
+          );
           continue;
         }
         try {
@@ -91,7 +98,6 @@ export class OutlineAgent extends BaseAgent {
       currentStage: "plan_outline",
       nextStage: "outline_approval",
       stageHistory: ["plan_outline"],
-      reviewRequested: false,
     };
   }
 }
@@ -106,7 +112,10 @@ function extractJson(text: string): string {
   return text.trim();
 }
 
-function formatOutlineMessage(outline: Record<string, unknown>, visualBible?: string | null): string {
+function formatOutlineMessage(
+  outline: Record<string, unknown>,
+  visualBible?: string | null,
+): string {
   const lines = ["故事大纲已生成"];
   const title = stringValue(outline.title);
   const logline = stringValue(outline.logline || outline.summary);

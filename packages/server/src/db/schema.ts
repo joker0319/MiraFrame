@@ -170,24 +170,6 @@ export const agentRuns = pgTable(
   }),
 );
 
-// ── AgentMessage ──
-export const agentMessages = pgTable(
-  "agentmessage",
-  {
-    id: serial("id").primaryKey(),
-    runId: integer("run_id")
-      .notNull()
-      .references(() => agentRuns.id, { onDelete: "cascade" }),
-    agent: varchar("agent", { length: 100 }).notNull(),
-    role: varchar("role", { length: 50 }).notNull(),
-    content: text("content").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    runIdx: index("agentmsg_run_idx").on(table.runId),
-  }),
-);
-
 // ── Message ──
 export const messages = pgTable(
   "message",
@@ -250,13 +232,8 @@ export const shotCharacterBindingRelations = relations(shotCharacterBindings, ({
   }),
 }));
 
-export const agentRunRelations = relations(agentRuns, ({ one, many }) => ({
+export const agentRunRelations = relations(agentRuns, ({ one }) => ({
   project: one(projects, { fields: [agentRuns.projectId], references: [projects.id] }),
-  messages: many(agentMessages),
-}));
-
-export const agentMessageRelations = relations(agentMessages, ({ one }) => ({
-  run: one(agentRuns, { fields: [agentMessages.runId], references: [agentRuns.id] }),
 }));
 
 export const messageRelations = relations(messages, ({ one }) => ({

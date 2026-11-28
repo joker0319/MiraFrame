@@ -1,68 +1,61 @@
-import { z } from "zod";
-import { ProjectProviderSettingsSchema, StoryOutlineSchema } from "./project";
+import type { RunStatus } from "./common";
+import type { ProjectProviderSettings } from "./project";
 
 // ── Agent Run ──
-export const AgentRunSchema = z.object({
-  id: z.string().uuid(),
-  projectId: z.string().uuid(),
-  status: z.string(),
-  currentAgent: z.string().nullable(),
-  progress: z.number(),
-  error: z.string().nullable(),
-  threadId: z.string().nullable(),
-  resourceType: z.string().nullable(),
-  resourceId: z.string().uuid().nullable(),
-  providerSnapshot: ProjectProviderSettingsSchema.nullable().optional(),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-export type AgentRun = z.infer<typeof AgentRunSchema>;
+export interface AgentRun {
+  id: number;
+  project_id: number;
+  status: RunStatus | string;
+  current_agent?: string;
+  /** 当前卡住的人工门，刷新页面后靠它恢复确认按钮 */
+  awaiting_gate?: string | null;
+  progress?: number;
+  error?: string | null;
+  thread_id?: string;
+  resource_type?: string;
+  resource_id?: number;
+  provider_snapshot?: ProjectProviderSettings | null;
+  created_at: string;
+  updated_at: string;
+}
 
-// ── Agent Message ──
-export const AgentMessageSchema = z.object({
-  id: z.string().uuid(),
-  projectId: z.string().uuid(),
-  runId: z.string().uuid().nullable(),
-  agent: z.string(),
-  role: z.string(),
-  content: z.string(),
-  summary: z.string().nullable(),
-  progress: z.number().nullable(),
-  isLoading: z.boolean(),
-  createdAt: z.string().datetime(),
-});
-export type AgentMessage = z.infer<typeof AgentMessageSchema>;
+// ── Message ──
+export interface Message {
+  id: number;
+  project_id: number;
+  run_id?: number | null;
+  agent: string;
+  role: string;
+  content: string;
+  summary?: string | null;
+  progress?: number | null;
+  is_loading?: boolean;
+  created_at: string;
+}
 
 // ── Recovery ──
-export const RecoveryStageSchema = z.object({
-  name: z.string(),
-  status: z.enum(["completed", "current", "pending", "blocked"]),
-  artifactCount: z.number(),
-});
-export type RecoveryStage = z.infer<typeof RecoveryStageSchema>;
+export interface RecoveryStageRead {
+  name: string;
+  status: "completed" | "current" | "pending" | "blocked";
+  artifact_count: number;
+}
 
-export const RecoverySummarySchema = z.object({
-  projectId: z.string().uuid(),
-  runId: z.string().uuid(),
-  threadId: z.string(),
-  currentStage: z.string(),
-  nextStage: z.string().nullable(),
-  preservedStages: z.array(z.string()),
-  stageHistory: z.array(RecoveryStageSchema),
-  resumable: z.boolean(),
-});
-export type RecoverySummary = z.infer<typeof RecoverySummarySchema>;
+export interface RecoverySummaryRead {
+  project_id: number;
+  run_id: number;
+  thread_id: string;
+  current_stage: string;
+  next_stage: string;
+  preserved_stages: string[];
+  stage_history: RecoveryStageRead[];
+  resumable: boolean;
+}
 
-export const RecoveryControlSchema = z.object({
-  state: z.enum(["active", "recoverable"]),
-  detail: z.string(),
-  availableActions: z.array(z.enum(["resume", "cancel"])),
-  threadId: z.string(),
-  activeRun: AgentRunSchema,
-  recoverySummary: RecoverySummarySchema,
-});
-export type RecoveryControl = z.infer<typeof RecoveryControlSchema>;
-
-// ── Run Status ──
-export const RunStatus = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
-export type RunStatus = z.infer<typeof RunStatus>;
+export interface RecoveryControlRead {
+  state: "active" | "recoverable";
+  detail: string;
+  available_actions: string[];
+  thread_id?: string;
+  active_run?: AgentRun | null;
+  recovery_summary?: RecoverySummaryRead | null;
+}

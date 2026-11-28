@@ -2,7 +2,7 @@
  * Shots API — update, approve, regenerate, delete.
  */
 import { fetchApi } from "./client";
-import type { Shot, ShotUpdatePayload, AgentRun } from "@/types";
+import type { RegenerateShotResponse, Shot, ShotUpdatePayload } from "@/types";
 
 export const shotsApi = {
   update: (id: number, data: ShotUpdatePayload) =>
@@ -17,11 +17,10 @@ export const shotsApi = {
     }),
 
   regenerate: (id: number, type: "image" | "video") =>
-    fetchApi<AgentRun>(`/api/v1/shots/${id}/regenerate`, {
+    fetchApi<RegenerateShotResponse>(`/api/v1/shots/${id}/regenerate`, {
       method: "POST",
       body: JSON.stringify({ type }),
     }),
 
-  delete: (id: number) =>
-    fetchApi<void>(`/api/v1/shots/${id}`, { method: "DELETE" }),
+  delete: (id: number) => fetchApi<void>(`/api/v1/shots/${id}`, { method: "DELETE" }),
 };

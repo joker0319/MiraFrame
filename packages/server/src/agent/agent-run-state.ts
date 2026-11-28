@@ -146,7 +146,6 @@ export function buildInitialState(input: GenerationInput): Phase2StateType {
     planRationale: "",
     routeStage: null,
     routeMode: input.mode,
-    reviewRequested: false,
     feedback: input.feedback || null,
     feedbackType: input.feedbackType || null,
     entityType: input.entityType || null,

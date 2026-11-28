@@ -21,6 +21,8 @@ RUN pnpm --filter @miraframe/server build
 
 # Production image
 FROM node:22-alpine AS production
+# 成片合成依赖 ffmpeg/ffprobe；不装的话运行时会报「缺少 ffmpeg」。
+RUN apk add --no-cache ffmpeg
 WORKDIR /app
 # pnpm 用相对软链组织依赖，软链入口分布在顶层与各包 node_modules；
 # 只拷 .pnpm 会丢掉这些入口，dist 的 bare import 与 face-api 模型路径都会解析失败。
@@ -37,6 +39,8 @@ COPY --from=base /app/packages/server/package.json ./packages/server/
 COPY --from=base /app/packages/shared/dist ./packages/shared/dist
 COPY --from=base /app/packages/agent/dist ./packages/agent/dist
 COPY --from=base /app/packages/server/dist ./packages/server/dist
+# 迁移 SQL 不参与编译，必须单独进镜像
+COPY --from=base /app/packages/server/drizzle ./packages/server/drizzle
 
 # workspace 包在源码态把 main/exports 指向 src/*.ts（供 tsx 开发期直跑），
 # 而生产镜像里没有 src，必须改指 dist，否则 dist 里的 bare import 依然解析失败。
@@ -48,4 +52,5 @@ EXPOSE 3000
 # 显式关闭避免每个 job 白起一个子进程再降级。
 ENV MIRAFRAME_MCP_ASSETS=0
 
-CMD ["node", "packages/server/dist/main.js"]
+# 先迁移再启动：表还没建就拉起服务，健康检查会过但所有请求都 500。
+CMD ["sh", "-c", "node packages/server/dist/migrate.js && node packages/server/dist/main.js"]

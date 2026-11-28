@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Captions } from "lucide-react";
-import { planSubtitleCues, type SubtitleCue } from "@miraframe/shared";
+import { planSubtitleCues, type SubtitleCue } from "@miraframe/shared/utils/dialogue";
 import { cn } from "@/lib/utils";
 
 /**

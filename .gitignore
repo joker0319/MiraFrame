@@ -1,4 +1,5 @@
 node_modules/
+.DS_Store
 dist/
 .turbo/
 *.tsbuildinfo
@@ -10,3 +11,4 @@ backups/
 # 运行时生成的导出产物（图片/视频，体积大且可重新生成）
 packages/server/static/exports/
 packages/server/static/videos/
+packages/server/static/uploads/

@@ -44,7 +44,7 @@ describe("Supervisor 端到端：模型规划驱动整条流水线", () => {
       currentStage: "plan_outline", nextStage: null, stageHistory: [],
       approvalHistory: {}, critiqueScores: {}, critiqueRound: 0,
       executionPlan: [], planRationale: "", artifactLineage: {},
-      routeStage: null, routeMode: "full" as const, reviewRequested: false,
+      routeStage: null, routeMode: "full" as const,
     };
 
     // 上下文只经 ALS 传递：并发 job 之间不会共享可变的全局对象

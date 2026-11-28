@@ -42,7 +42,6 @@ function mockState(overrides?: Partial<Phase2StateType>): Phase2StateType {
     planRationale: "",
     routeStage: null,
     routeMode: "full",
-    reviewRequested: false,
     ...overrides,
   } as Phase2StateType;
 }
@@ -287,7 +286,6 @@ describe("ReviewRuleEngine", () => {
     const result = await engine.run(ctx, state);
     expect(result.routeStage).toBe("plan_outline");
     expect(result.routeMode).toBe("incremental");
-    expect(result.reviewRequested).toBe(false);
   });
 });
 

@@ -34,8 +34,7 @@ export const useMessageStore = create<MessageState>((set) => ({
   messages: [],
   highlightedMessageIndex: null,
 
-  addMessage: (message) =>
-    set((state) => ({ messages: [...state.messages, message] })),
+  addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
 
   setMessages: (messages) => set({ messages }),
 
@@ -61,7 +60,7 @@ export const useMessageStore = create<MessageState>((set) => ({
       return changed ? { messages: updated } : state;
     }),
 
-  cleanupStaleMessages: (completedAgent) =>
+  cleanupStaleMessages: (_completedAgent) =>
     set((state) => {
       const filtered = state.messages.filter((m) => {
         // Remove info messages containing "已确认" or "继续执行"

@@ -702,3 +702,116 @@ MCP tool 'read_text_asset' on server 'assets' returned an error: ERROR: 路径�
 **演示脚本**。`docs/DEMO_SCRIPT.md` 给出 2 分钟、7 段的分镜表：每段的时间、画面、操作和讲解要点；README 产品截图章节预留五张图的文件名与时间点（注释占位，图没到齐不会破图）。录制重点是人工确认门、一致性自动修复、两阶段 Critique 和字幕开关这些只有本项目才有的东西，不是堆生成结果。
 
 **脱稿速记卡**。`docs/INTERVIEW_CHEATSHEET.md` 把 Q1–Q17 压成「一句话锚点 + 三个关键词」，Q14–Q17 展开讲法层次（旧痛点 → 设计 → 被测试逼出来的取舍 → 边界），另附主动交代的边界清单与代码定位表；当时的 `INTERVIEW_GUIDE.md`（现已并入 `CAREER_HANDBOOK.md`）顶部加了入口。
+
+## 正确性修复：把“文档里承认的债”还掉一轮（2026-11-28）
+
+这一轮不新增生成能力，只修“已经写出来、但会在特定路径下出错或不诚实”的地方。
+
+### 1. 历史窗口取错方向
+
+`agent.processor.ts` 用 `orderBy(asc(createdAt)).limit(120)` 取历史，拿到的是**最早** 120 条。项目消息一多，最近几轮反馈永远进不了 prompt，滚动摘要也停在早期。改为 `desc + limit(120)` 后再反转成正序。这是“多轮记忆”能否成立的前提。
+
+### 2. 条件边目的地漏登记
+
+`graph.ts` 里 `review` 的合法目标包含 `plan_shots`/`render_shot_images`，`characters_approval`/`shots_approval` 拒绝时也会返回上一阶段，但条件边的 map 没登记这些目的地，运行到一半抛 `Branch condition returned unknown destination`。现在把 7 张目的地表抽成导出常量，构建时统一使用，并新增结构测试遍历「路由函数所有可能的返回值」。
+
+### 3. 取消不再是“只在门口生效”
+
+原来 `cancelGeneration` 只往 Redis 发消息，只有正卡在 `waitForConfirm` 的 job 收得到；正在跑 LLM/逐镜出视频的 job 听不见，最后还会把 `cancelled` 覆盖成 `succeeded`。现在：
+
+- 节点循环边界、逐角色/逐镜头循环、compose 前都查一次 run 状态；
+- 取消抛独立的 `RunCancelledError`，catch 里只收尾、不发 `run_failed`；
+- 成功/失败更新都带 `status in (queued,running)` 条件，绝不覆盖已取消状态。
+
+### 4. 大纲反馈不再污染 story
+
+`approve-outline` 带反馈时，原实现把反馈拼进 `project.story` 再起 run，且不传 `feedback`。现在改走 `submitRevision({entityType:"outline"})`：反馈进 message + run 的 feedback 字段，story 保持用户原始输入；前端也按 `status=regenerating` 区分“重生成”和“审批通过”。
+
+### 5. 进度回跳与上传
+
+- `sendMessage` 只有显式 `progress` 才推进进度，stage-only 消息不再把进度写回 0。
+- 参考图上传补了 `multer` 磁盘存储（`static/uploads`）、大小/类型限制和 `PUBLIC_BASE_URL` 拼接；之前返回的 `/static/uploads/upload` 必然 404。
+
+### 6. 死路径清理与契约收敛
+
+- WS `confirm` 补了网关处理器：校验 room、run 归属和 active 状态后走同一条 Redis 频道，前端 yolo 不再打空。
+- 删除没有后端的 `versionsApi` / `exportApi` / `styleTemplatesApi` 与未引用的 `OutlinePreviewCard`；新项目页不再请求 404 的 style-templates。
+- 前端 WS 事件白名单改为直接消费 `shared` 的 `WS_EVENT_TYPES`，事件名只维护一份。
+
+### 7. 测试与部署
+
+- 新增图级 E2E：不依赖 DB/真模型，从大纲一路 confirm 到成片，断言四个门顺序与 compose 只执行一次。
+- Dockerfile 生产镜像补 `ffmpeg`/`ffprobe` 与启动迁移入口（`src/migrate.ts`）；nginx 补 `/static/` 反代；compose 补 `PUBLIC_BASE_URL`，并在 Linux 容器默认 `TTS_PROVIDER=none`。
+
+**验证**：全仓 **451 个测试通过**（shared 79 / agent 96 / server 225 / frontend 51），`tsc --noEmit` 四个包通过。Docker 镜像本机未实测构建。
+
+## shared 契约收敛：三套类型 → 一套（2026-11-28）
+
+**问题**：`shared` 里是 UUID + camelCase 的旧 Zod 模型，数据库是 serial 整数，前端又有一份 736 行本地类型，REST 还直接返回 Drizzle 行（camelCase + Date），WS 却手写 snake_case。同一份数据有四种形状，前端只能靠 `normalizeProject/normalizeCharacter/...` 兼容两套 key。
+
+**做法**：
+
+1. **重写 `shared/src/types`**：以真实接口为准，统一为整数 ID、snake_case、ISO 时间；覆盖 Project/Character/Shot/AgentRun/Message/Consistency/Config 与 30 个 WS 事件；新增 `WsEventDataMap` 和强类型 `WsEvent` 信封。删除旧 UUID/Zod schema 与两个对应的旧测试文件。
+2. **前端只留 UI 私有类型**：`frontend/src/types/index.ts` 改为 `export type * from "@miraframe/shared"`，仅保留 `WorkflowStage`、`AgentMessage`、`AGENT_NAME_MAP`。
+3. **服务端新增 DTO 层**：`server/src/contracts/dto.ts` 把 Drizzle 行转成 shared 类型，Projects/Characters/Shots 的 REST 输出全部走 DTO；`agent.processor` 的 WS 角色/镜头载荷也复用同一套 DTO，删掉两份手写 payload。
+4. **WS 网关类型化**：`sendToProject` 改为 `sendToProject<K extends WsEventType>(..., event: K, data: WsEventDataMap[K])`，所有调用点的字段名/可空性由编译器检查。
+5. **删除前端兼容层**：`projectsApi` 不再有 `ServerProject/ServerCharacter/...` 与 `normalize*` 函数；`run_message` 的 `isLoading`、`data_cleared` 的 `clearedTypes` 一并改为 snake_case。
+6. **运行时校验**：shared 补 `schemas/`（实体、WS 事件、请求体、配置）：
+   - REST 入参走 `ZodValidationPipe`，非法 body 直接 400 + issues 路径；
+   - DTO 返回前 `safeParse`，开发/测试失败即抛，生产只记日志；
+   - `WsGateway.sendToProject` 按 `WS_EVENT_DATA_SCHEMAS` 校验出站事件，同样是开发/测试抛、生产记录；
+   - 模型产物（StoryOutline）的 schema 比类型宽松，允许 `{raw}` 兜底。
+
+**测试策略变化**：删掉的 shared 旧测试是给 UUID/Zod 模型写的，已经不代表真实契约；替换为 `contracts.test.ts`（类型 fixture + WS 事件完整性）和 server 的 `dto-contract.test.ts`（DTO 输出必须匹配 shared）。所以测试总数从 451 降到 414，不是覆盖退化，而是移除了“测错模型”的用例。
+
+**验证**：shared 26 / agent 96 / server 241 / frontend 51，共 **414 个测试通过**；四包 `tsc --noEmit` 通过。
+
+## 代码瘦身：删死代码 + 拆 processor（2026-11-28）
+
+**删除死代码**
+
+- `RenderAgent` 没有进图，只被 index 导出，删除 `agents/render.ts` 与导出。
+- `reviewRequested` 从 state、6 个路由守卫、各 Agent 返回值和测试 fixture 中移除：它从未被置 true，`review` 节点实际只通过 `currentStage=review` 进入。
+- `shared` 删除无人引用的 `ArtifactVersion / ConfigSection / AppConfig`。
+- 前端删除无人调用的 `getStaticUrl`、半废弃的 typewriter 完成状态，以及未使用的 React/图标/类型导入。
+
+**拆 processor**
+
+`agent.processor.ts` 从 1206 行降到 **424 行**，抽出：
+
+- `processor/agent-context.ts`：AgentContext 的 12 个方法（DB/供应商/WS 副作用）；
+- `processor/post-processing.ts`：一致性检测、漂移自动修复、关键帧视觉审查（含原测试需要的编排逻辑）；
+- `processor/gate.ts`：`waitForConfirm` 的 Redis 订阅生命周期；
+- `processor/prompts.ts`：镜头出图/出视频提示词与 `isPlayableVideoUrl`。
+
+同时删除未使用的 `REDIS_CLIENT`（processor）与 `REDIS_SUBSCRIBER`（AgentService）构造依赖，以及 `revision.service`/`shot-repair`/`mcp sdk toolkit` 的未用导入。
+
+**收口 `agentmessage` 死表**：该表只有 schema/relations，没有任何读写。删除表定义与 relation，生成迁移 `0004_hot_scarecrow.sql`（`DROP TABLE "agentmessage" CASCADE`），并用临时库跑通全部迁移，最终 7 张表。
+
+**验证**：414 个测试仍全过（shared 26 / agent 96 / server 241 / frontend 51），四包 `tsc --noEmit`、build 通过。改动没有改变外部行为。
+
+## 部署硬化：共享口令 + 限流 + env_file（2026-11-28）
+
+**共享口令（可选）**
+
+- 新增 `ApiAuthGuard`：配置 `API_TOKEN` 后，所有 HTTP 接口要求 `X-API-Token` / `X-Admin-Token` / `Authorization: Bearer` 之一；未配置时保持本地开发放行。
+- 新增 WS 握手校验：`WsGateway.handleConnection` 读取 `handshake.auth.token`，不匹配直接断开。
+- 前端 `fetchApi` 发送 `X-API-Token`（来自 `VITE_API_TOKEN`），Socket.IO 在 `auth.token` 里携带同一个值。
+- **边界**：这是共享口令门，不是用户级鉴权；前端 bundle 里的 token 可被查看，公网仍需接 OIDC/Session。
+
+**限流**
+
+- 新增 `RateLimitGuard`：`RATE_LIMIT_PER_MINUTE` 控制单实例固定窗口限流，`0` 关闭；超限返回 429。
+- compose 默认 120 次/分钟。多实例部署应换 Redis/网关级限流，否则额度会按副本数放大。
+
+**部署配置**
+
+- `docker-compose.yml` 的 server 增加 `env_file: .env`，把模型 Key、ADMIN_TOKEN 等带进容器；`environment` 仍覆盖 DB/Redis 地址。
+- 增加 `API_TOKEN`、`RATE_LIMIT_PER_MINUTE`；frontend 构建增加 `VITE_API_TOKEN` ARG。
+- `.env.example` / `packages/frontend/.env.example` 补充说明；生产环境未配 `API_TOKEN` / `ADMIN_TOKEN` 时启动日志告警。
+
+**命令响应 runtime schema**
+
+- `schemas/api.ts` 覆盖 generate/resume/cancel/approve/revision/feedback/upload/regenerate/embedding 回执；控制器返回前 `assertContract`。
+
+**验证**：414 个测试通过（shared 26 / agent 96 / server 241 / frontend 51）；四包 typecheck/build 通过；本机实测无 token 401、带 token 200、第 4 次请求 429；临时库迁移后 7 张表。

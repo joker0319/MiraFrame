@@ -5,6 +5,24 @@ import { AgentService } from "../../agent/agent.service";
 import { DRIZZLE, type Db, schema } from "../../db";
 import { desc, eq } from "drizzle-orm";
 import { WsGateway } from "../../ws";
+import {
+  ApproveOutlineRequestSchema,
+  ApproveOutlineResponseSchema,
+  CancelRunResponseSchema,
+  FeedbackResponseSchema,
+  GenerateRequestSchema,
+  GenerateRunResponseSchema,
+  ResumeRequestSchema,
+  ResumeRunResponseSchema,
+} from "@miraframe/shared";
+import type {
+  ApproveOutlineRequest,
+  GenerateRequest,
+  ResumeRequest,
+  StoryOutline,
+} from "@miraframe/shared";
+import { ZodValidationPipe } from "../../common/zod-validation.pipe";
+import { assertContract } from "../../contracts/assert";
 
 @Controller("api/v1/projects/:projectId")
 export class GenerationController {
@@ -19,7 +37,7 @@ export class GenerationController {
   @HttpCode(HttpStatus.ACCEPTED)
   async generate(
     @Param("projectId") projectId: string,
-    @Body() body: { auto_mode?: boolean; target_stage?: string },
+    @Body(new ZodValidationPipe(GenerateRequestSchema)) body: GenerateRequest,
   ) {
     const runId = await this.agentService.startGeneration({
       projectId: parseInt(projectId),
@@ -28,10 +46,11 @@ export class GenerationController {
       targetStage: body.target_stage,
     });
 
-    return {
-      run_id: runId,
-      status: "queued",
-    };
+    return assertContract(
+      GenerateRunResponseSchema,
+      { run_id: runId, status: "queued" },
+      "GenerateRunResponse",
+    );
   }
 
   @Post("generate/cancel")
@@ -45,10 +64,20 @@ export class GenerationController {
       .orderBy(desc(schema.agentRuns.createdAt))
       .limit(5);
     const cancellableRun = recentRuns.find((run) => run.status === "running" || run.status === "queued");
-    if (!cancellableRun) return { status: "cancelled", cancelled: 0 };
+    if (!cancellableRun) {
+      return assertContract(
+        CancelRunResponseSchema,
+        { status: "cancelled", cancelled: 0 },
+        "CancelRunResponse",
+      );
+    }
 
     await this.agentService.cancelGeneration(projectId, cancellableRun.id);
-    return { status: "cancelled", cancelled: 1, run_id: cancellableRun.id };
+    return assertContract(
+      CancelRunResponseSchema,
+      { status: "cancelled", cancelled: 1, run_id: cancellableRun.id },
+      "CancelRunResponse",
+    );
   }
 
   @Post("generate/:runId/cancel")
@@ -58,7 +87,11 @@ export class GenerationController {
     @Param("runId") runId: string,
   ) {
     await this.agentService.cancelGeneration(parseInt(projectId), parseInt(runId));
-    return { status: "cancelled" };
+    return assertContract(
+      CancelRunResponseSchema,
+      { status: "cancelled" },
+      "CancelRunResponse",
+    );
   }
 
   @Post("generate/:runId/resume")
@@ -66,7 +99,7 @@ export class GenerationController {
   async resume(
     @Param("projectId") projectId: string,
     @Param("runId") runId: string,
-    @Body() body: { confirm?: boolean; feedback?: string },
+    @Body(new ZodValidationPipe(ResumeRequestSchema)) body: ResumeRequest,
   ) {
     // Use injected Redis client (no manual connection)
     await this.redis.publish(
@@ -80,54 +113,48 @@ export class GenerationController {
       run_id: parseInt(runId),
       project_id: parseInt(projectId),
     });
-    return { status: "resumed" };
+    return assertContract(ResumeRunResponseSchema, { status: "resumed" }, "ResumeRunResponse");
   }
 
   @Post("approve-outline")
   @HttpCode(HttpStatus.ACCEPTED)
   async approveOutline(
     @Param("projectId") projectIdParam: string,
-    @Body() body: { feedback?: string },
+    @Body(new ZodValidationPipe(ApproveOutlineRequestSchema)) body: ApproveOutlineRequest,
   ) {
     const projectId = parseInt(projectIdParam);
 
-    // If feedback is provided, regenerate outline instead of approving
+    // If feedback is provided, regenerate outline instead of approving.
+    // 走 revision 流程而不是把反馈拼进 story：story 是用户的原始创作输入，
+    // 拼进去会永久污染它，而且新 run 拿不到 feedback 字段，Director/记忆都看不见。
     if (body.feedback && body.feedback.trim().length > 0) {
-      const [project] = await this.db
-        .select({ story: schema.projects.story })
-        .from(schema.projects)
-        .where(eq(schema.projects.id, projectId));
-
-      // Append feedback to the story context for regeneration
-      const enhancedStory = (project?.story || "") + "\n\n[用户反馈]\n" + body.feedback;
-
-      // Ensure outline_approved is false before regenerating
       await this.db
         .update(schema.projects)
         .set({ outlineApproved: false, updatedAt: new Date() })
         .where(eq(schema.projects.id, projectId));
 
-      // Start a new generation run from plan_outline to regenerate the outline
-      const runId = await this.agentService.startGeneration({
+      const runId = await this.agentService.submitRevision({
         projectId,
-        mode: "full",
-        autoMode: false,
-        targetStage: "plan_outline",
+        content: body.feedback.trim(),
+        entityType: "outline",
+        feedbackType: "regenerate",
       });
 
       this.wsGateway.sendToProject(projectId, "outline_updated", {
         project_id: projectId,
-        story_outline: null,
-        visual_bible: null,
         outline_approved: false,
       });
 
-      return {
-        status: "regenerating",
-        action: "regenerate",
-        run_id: runId,
-        feedback: body.feedback,
-      };
+      return assertContract(
+        ApproveOutlineResponseSchema,
+        {
+          status: "regenerating",
+          action: "regenerate",
+          run_id: runId,
+          feedback: body.feedback,
+        },
+        "ApproveOutlineResponse",
+      );
     }
     try {
       const [project] = await this.db
@@ -142,7 +169,7 @@ export class GenerationController {
 
       this.wsGateway.sendToProject(projectId, "outline_updated", {
         project_id: projectId,
-        story_outline: project?.storyOutline ?? null,
+        story_outline: (project?.storyOutline as StoryOutline | null) ?? null,
         visual_bible: project?.visualBible ?? null,
         outline_approved: true,
       });
@@ -157,12 +184,16 @@ export class GenerationController {
         targetStage: "plan_characters",
       });
 
-      return {
-        status: "approved",
-        action: "started",
-        run_id: runId,
-        resumed: false,
-      };
+      return assertContract(
+        ApproveOutlineResponseSchema,
+        {
+          status: "approved",
+          action: "started",
+          run_id: runId,
+          resumed: false,
+        },
+        "ApproveOutlineResponse",
+      );
     } catch (error) {
       console.error("[generation] approve-outline failed:", error);
       throw error;
@@ -182,6 +213,10 @@ export class GenerationController {
       body.feedback,
       body.feedback_type,
     );
-    return { status: "feedback_received" };
+    return assertContract(
+      FeedbackResponseSchema,
+      { status: "feedback_received" },
+      "FeedbackResponse",
+    );
   }
 }

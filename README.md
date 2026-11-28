@@ -38,7 +38,7 @@ corepack enable
 corepack prepare pnpm@9.12.0 --activate
 ```
 
-### 四步启动
+### 五步启动
 
 ```bash
 # 1. 只启动数据库和 Redis
@@ -50,7 +50,10 @@ cp .env.example .env
 # 3. 安装依赖
 pnpm install
 
-# 4. 分别开两个终端，启动后端和前端
+# 4. 建表（首次启动或拉了新迁移后）
+pnpm --dir packages/server db:migrate
+
+# 5. 分别开两个终端，启动后端和前端
 pnpm --dir packages/server dev
 pnpm --dir packages/frontend dev
 ```
@@ -121,7 +124,7 @@ MiraFrame/
 │   ├── frontend/   # React 18 + Vite + Zustand + TanStack Query
 │   ├── server/     # NestJS API + WebSocket + Drizzle + BullMQ
 │   ├── agent/      # LangGraph.js 状态图与 Agent 节点
-│   └── shared/     # 共享类型、Zod Schema、阶段名、WS 事件
+│   └── shared/     # 接口契约（snake_case）、阶段名、WS 事件、字幕规则
 ├── docs/           # 演示视频、截图、专题文档
 ├── docker-compose.yml / docker-compose.dev.yml
 └── .env.example
@@ -129,7 +132,7 @@ MiraFrame/
 
 依赖方向很简单：`frontend → server → agent`，三者都依赖 `shared`。
 
-- `shared` 只放契约，前后端共用一套类型和校验规则。
+- `shared` 是接口契约的唯一来源：前端直接 re-export 它的类型，服务端用它约束 REST/WS 输出；shared 里同时定义 Zod schema，服务端在 REST 入参、DTO 出站和 WS 出站三处做运行时校验。
 - `agent` 只管决策，不认识数据库和 HTTP。
 - `server` 负责「脏活」：数据库、队列、供应商调用、消息推送。
 - `frontend` 只通过 REST 和 WebSocket 跟后端说话。
@@ -169,7 +172,7 @@ MiraFrame/
 默认库名现在是 `miraframe`。不要随意改 Docker Compose 的 project name 或 volume 名，否则可能挂到新卷、旧数据看起来「消失」。
 
 **能直接部署上线吗？**
-暂时不能。Docker 文件只是骨架，公网部署前还缺 ffmpeg / ffprobe、`say` 语音、自动迁移、若干环境变量与静态卷配置。当前定位是本地学习、演示和原型。
+还不能。Docker 侧已经补了 ffmpeg/ffprobe、启动时迁移、nginx `/static/` 反代、同源 WS、`env_file`、可选 API_TOKEN（HTTP/WS 共享口令）和单实例限流；但公网部署前仍缺**用户级鉴权/会话**、密钥托管、静态卷和可观测性。启用共享口令时，server 的 `API_TOKEN` 与前端构建期 `VITE_API_TOKEN` 必须一致；否则 UI 会拿到 401。容器内没有 macOS `say`，compose 默认关闭 TTS。当前定位仍是本地学习、演示和原型。
 
 ---
 
@@ -187,7 +190,7 @@ pnpm --dir packages/server db:generate
 pnpm --dir packages/server db:migrate
 ```
 
-**当前基线**（截至 2026-11-25，commit `c49fb69`，72 个提交）：443 个测试通过（shared 79 / agent 92 / server 221 / frontend 51），`pnpm build` 与 `pnpm typecheck` 通过。
+**当前基线**（截至 2026-11-28，77 个提交，含本轮契约收敛与瘦身）：414 个测试通过（shared 26 / agent 96 / server 241 / frontend 51），`pnpm build` 与 `pnpm typecheck` 通过。
 
 ---
 

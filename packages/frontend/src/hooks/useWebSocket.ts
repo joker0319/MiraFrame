@@ -9,8 +9,9 @@ import { useCritiqueStore } from "@/stores/critiqueStore";
 import { useMessageStore } from "@/stores/messageStore";
 import { useProjectStore } from "@/stores/projectStore";
 import { resolveEventStage } from "@/utils/workflowStage";
-import { getApiBase } from "@/services/client";
-import type { AgentMessage, ShotConsistencyResult, WorkflowStage } from "@/types";
+import { getApiBase, getApiToken } from "@/services/client";
+import { WS_EVENT_TYPES } from "@miraframe/shared/constants";
+import type { AgentMessage, ShotConsistencyResult } from "@/types";
 
 // ---- Module-level state (shared across hook instances) ----
 const globalSockets = new Map<number, Socket>();
@@ -101,7 +102,7 @@ function applyEvent(eventName: string, data: Record<string, unknown>) {
         content: (data.content as string) || "",
         summary: (data.summary as string) || undefined,
         progress: (data.progress as number) || undefined,
-        isLoading: (data.isLoading as boolean) || false,
+        isLoading: (data.is_loading as boolean) || false,
         phase: (data.phase as AgentMessage["phase"]) || undefined,
         details: (data.details as string) || undefined,
       };
@@ -199,7 +200,7 @@ function applyEvent(eventName: string, data: Record<string, unknown>) {
       break;
 
     case "data_cleared": {
-      const cleared = data.clearedTypes as string[] | undefined;
+      const cleared = data.cleared_types as string[] | undefined;
       if (cleared?.includes("characters")) stores.character.clearCharacters();
       if (cleared?.includes("shots")) stores.shot.clearShots();
       stores.project.setProjectVideoUrl(null);
@@ -377,6 +378,7 @@ export function useWebSocket(projectId: number | null) {
       // 与 API 共用同一 base：生产同源走 nginx 的 /ws/，HTTPS 下不会被 mixed content 拦；
       // 开发环境仍直连 3000，显式配置 VITE_API_URL 时同理。
       socket = io(`${getApiBase()}/ws/projects`, {
+        auth: { token: getApiToken() ?? undefined },
         transports: ["websocket", "polling"],
         reconnection: true,
         reconnectionDelay: 3000,
@@ -408,16 +410,8 @@ export function useWebSocket(projectId: number | null) {
     socketRef.current = socket;
 
     // (Re-)register all event handlers — use socket.off first to prevent duplicates
-    const eventNames = [
-      "connected", "error",
-      "run_started", "run_progress", "run_message", "agent_thinking",
-      "run_completed", "run_failed", "run_awaiting_confirm", "run_confirmed", "run_cancelled",
-      "character_created", "character_updated", "character_deleted",
-      "shot_created", "shot_updated", "shot_deleted",
-      "outline_updated", "project_updated", "data_cleared",
-      "critique_result", "bible_updated", "version_created", "version_rollback",
-      "audio_generated", "export_completed", "consistency_eval_completed", "consistency_repair_completed",
-    ];
+    // 直接使用 shared 里的事件白名单：新增事件只改一处，前端自动开始监听。
+    const eventNames = [...WS_EVENT_TYPES];
 
     for (const eventName of eventNames) {
       socket.off(eventName); // Remove any previous listener

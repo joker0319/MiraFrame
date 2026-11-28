@@ -14,6 +14,21 @@ import { DRIZZLE, type Db, schema } from "../../db";
 import { WsGateway } from "../../ws";
 import { AgentService } from "../../agent";
 import { eq } from "drizzle-orm";
+import { toCharacterBibleDto, toCharacterDto } from "../../contracts/dto";
+import {
+  AddReferenceImageSchema,
+  BibleUpdateSchema,
+  CharacterUpdateSchema,
+  ComputeEmbeddingResponseSchema,
+  RegenerateCharacterResponseSchema,
+} from "@miraframe/shared";
+import type {
+  AddReferenceImagePayload,
+  BibleUpdatePayload,
+  CharacterUpdatePayload,
+} from "@miraframe/shared";
+import { ZodValidationPipe } from "../../common/zod-validation.pipe";
+import { assertContract } from "../../contracts/assert";
 
 @Controller("api/v1/characters")
 export class CharactersController {
@@ -24,7 +39,10 @@ export class CharactersController {
   ) {}
 
   @Put(":id")
-  async update(@Param("id") id: string, @Body() body: Record<string, unknown>) {
+  async update(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(CharacterUpdateSchema)) body: CharacterUpdatePayload,
+  ) {
     const patch: Partial<typeof schema.characters.$inferInsert> = compactUpdate({
       name: body.name as string | undefined,
       description: body.description as string | undefined,
@@ -41,7 +59,9 @@ export class CharactersController {
       .returning();
 
     if (character) {
-      this.wsGateway.sendToProject(character.projectId, "character_updated", { character });
+      const dto = toCharacterDto(character);
+      this.wsGateway.sendToProject(character.projectId, "character_updated", { character: dto });
+      return dto;
     }
     return character;
   }
@@ -68,8 +88,10 @@ export class CharactersController {
       .where(eq(schema.characters.id, parseInt(id)))
       .returning();
 
-    this.wsGateway.sendToProject(character.projectId, "character_updated", { character: updated });
-    return updated;
+    if (!updated) return updated;
+    const dto = toCharacterDto(updated);
+    this.wsGateway.sendToProject(character.projectId, "character_updated", { character: dto });
+    return dto;
   }
 
   @Post(":id/regenerate")
@@ -90,7 +112,16 @@ export class CharactersController {
       feedbackType: "regenerate_image",
     });
 
-    return { status: "queued", character_id: characterId, project_id: character.projectId, run_id: runId };
+    return assertContract(
+      RegenerateCharacterResponseSchema,
+      {
+        status: "queued",
+        character_id: characterId,
+        project_id: character.projectId,
+        run_id: runId,
+      },
+      "RegenerateCharacterResponse",
+    );
   }
 
   @Delete(":id")
@@ -113,18 +144,17 @@ export class CharactersController {
   @Get(":id/bible")
   async getBible(@Param("id") id: string) {
     const [character] = await this.db
-      .select({
-        id: schema.characters.id,
-        visualNotes: schema.characters.visualNotes,
-        referenceImages: schema.characters.referenceImages,
-      })
+      .select()
       .from(schema.characters)
       .where(eq(schema.characters.id, parseInt(id)));
-    return character || { error: "Not found" };
+    return character ? toCharacterBibleDto(character) : { error: "Not found" };
   }
 
   @Put(":id/bible")
-  async updateBible(@Param("id") id: string, @Body() body: Record<string, unknown>) {
+  async updateBible(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(BibleUpdateSchema)) body: BibleUpdatePayload,
+  ) {
     const patch: Partial<typeof schema.characters.$inferInsert> = compactUpdate({
       visualNotes: body.visual_notes as string | null | undefined,
       referenceImages: body.reference_images as string[] | undefined,
@@ -141,12 +171,16 @@ export class CharactersController {
       this.wsGateway.sendToProject(character.projectId, "bible_updated", {
         character_id: parseInt(id),
       });
+      return toCharacterBibleDto(character);
     }
     return character;
   }
 
   @Post(":id/reference-images")
-  async addReferenceImage(@Param("id") id: string, @Body() body: { image_url: string }) {
+  async addReferenceImage(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(AddReferenceImageSchema)) body: AddReferenceImagePayload,
+  ) {
     const [character] = await this.db
       .select()
       .from(schema.characters)
@@ -159,7 +193,7 @@ export class CharactersController {
       .set({ referenceImages: images, updatedAt: new Date() })
       .where(eq(schema.characters.id, parseInt(id)))
       .returning();
-    return updated;
+    return updated ? toCharacterBibleDto(updated) : updated;
   }
 
   @Delete(":id/reference-images/:index")
@@ -180,7 +214,11 @@ export class CharactersController {
 
   @Post(":id/compute-embedding")
   async computeEmbedding(@Param("id") id: string) {
-    return { status: "queued", character_id: parseInt(id) };
+    return assertContract(
+      ComputeEmbeddingResponseSchema,
+      { status: "queued", character_id: parseInt(id) },
+      "ComputeEmbeddingResponse",
+    );
   }
 }
 

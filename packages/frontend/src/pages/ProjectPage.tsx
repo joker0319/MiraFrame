@@ -3,16 +3,7 @@
 import { forwardRef, useEffect, useRef, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  CheckCircle2,
-  Download,
-  FileText,
-  Film,
-  Image,
-  Play,
-  RefreshCw,
-  Users,
-} from "lucide-react";
+import { CheckCircle2, Download, FileText, Film, Image, Play, Users } from "lucide-react";
 import { TopBar } from "@/components/layout/TopBar";
 import { StagePipeline } from "@/components/layout/StagePipeline";
 import { ChatDrawer } from "@/components/chat/ChatDrawer";
@@ -31,7 +22,7 @@ import { useWorkflowNodeSelection } from "@/hooks/useWorkflowNodeSelection";
 import { projectsApi } from "@/services/projectsApi";
 import { cn } from "@/lib/utils";
 import { BRAND } from "@/lib/brand";
-import type { ProjectRevisionPayload } from "@/types";
+import type { GenerateRunResponse, ProjectRevisionPayload } from "@/types";
 import {
   buildMaterialStages,
   consistencyAlert,
@@ -102,9 +93,9 @@ export default function ProjectPage() {
       if (token !== generateRequestToken.current) throw new Error("STALE_REQUEST");
       return result;
     },
-    onSuccess: (data: { run_id?: number; id?: number }) => {
+    onSuccess: (data: GenerateRunResponse) => {
       setGenerating(true);
-      setCurrentRunId(data.run_id ?? data.id ?? null);
+      setCurrentRunId(data.run_id);
       setCurrentStage("outline");
     },
   });
@@ -119,7 +110,8 @@ export default function ProjectPage() {
   });
 
   const revisionMutation = useMutation({
-    mutationFn: (payload: ProjectRevisionPayload) => projectsApi.submitRevision(projectId!, payload),
+    mutationFn: (payload: ProjectRevisionPayload) =>
+      projectsApi.submitRevision(projectId!, payload),
     onSuccess: (data, payload) => {
       if (data.run_id) setCurrentRunId(data.run_id);
       setGenerating(true);
@@ -132,12 +124,23 @@ export default function ProjectPage() {
   const approveOutlineMutation = useMutation({
     mutationFn: (feedback?: string) => projectsApi.approveOutline(projectId!, feedback),
     onSuccess: (data) => {
-      setProjectOutlineApproved(true);
       setAwaitingConfirm(false);
-      if (data.run_id) {
-        setCurrentRunId(data.run_id);
-        setGenerating(true);
-        setCurrentStage("characters");
+      if (data.status === "regenerating") {
+        // 带反馈时后端是「重生成大纲」，不是「审批通过」——这里不能再把
+        // outline_approved 置 true、进度跳到角色阶段，否则 UI 会撒谎。
+        setProjectOutlineApproved(false);
+        if (data.run_id) {
+          setCurrentRunId(data.run_id);
+          setGenerating(true);
+          setCurrentStage("outline");
+        }
+      } else {
+        setProjectOutlineApproved(true);
+        if (data.run_id) {
+          setCurrentRunId(data.run_id);
+          setGenerating(true);
+          setCurrentStage("characters");
+        }
       }
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
     },
@@ -161,27 +164,45 @@ export default function ProjectPage() {
 
   const handleCancel = useCallback(() => cancelMutation.mutate(), [cancelMutation]);
 
-  const handleSendFeedback = useCallback((content: string) => feedbackMutation.mutate(content), [feedbackMutation]);
+  const handleSendFeedback = useCallback(
+    (content: string) => feedbackMutation.mutate(content),
+    [feedbackMutation],
+  );
 
-  const handleSubmitRevision = useCallback((payload: ProjectRevisionPayload) => {
-    revisionMutation.mutate(payload);
-  }, [revisionMutation]);
+  const handleSubmitRevision = useCallback(
+    (payload: ProjectRevisionPayload) => {
+      revisionMutation.mutate(payload);
+    },
+    [revisionMutation],
+  );
 
-  const handleConfirm = useCallback((feedback?: string) => {
-    const isOutlineGate = awaitingAgent === "outline" || !!projectQuery.data?.story_outline && !projectQuery.data?.outline_approved;
-    if (projectId && isOutlineGate) {
-      approveOutlineMutation.mutate(feedback);
-      return;
-    }
-    if (currentRunId) resumeMutation.mutate({ runId: currentRunId, feedback });
-  }, [approveOutlineMutation, awaitingAgent, currentRunId, projectId, projectQuery.data?.outline_approved, projectQuery.data?.story_outline, resumeMutation]);
+  const handleConfirm = useCallback(
+    (feedback?: string) => {
+      const isOutlineGate =
+        awaitingAgent === "outline" ||
+        (!!projectQuery.data?.story_outline && !projectQuery.data?.outline_approved);
+      if (projectId && isOutlineGate) {
+        approveOutlineMutation.mutate(feedback);
+        return;
+      }
+      if (currentRunId) resumeMutation.mutate({ runId: currentRunId, feedback });
+    },
+    [
+      approveOutlineMutation,
+      awaitingAgent,
+      currentRunId,
+      projectId,
+      projectQuery.data?.outline_approved,
+      projectQuery.data?.story_outline,
+      resumeMutation,
+    ],
+  );
 
   const handleContinuePlanning = useCallback(async () => {
     if (!projectId) return;
     const result = await projectsApi.generate(projectId, { target_stage: "plan_characters" });
-    const queuedRun = result as typeof result & { run_id?: number };
     setGenerating(true);
-    setCurrentRunId(queuedRun.run_id ?? result.id ?? null);
+    setCurrentRunId(result.run_id);
     setCurrentStage("outline");
     openChatPanel();
   }, [openChatPanel, projectId, setCurrentRunId, setCurrentStage, setGenerating]);
@@ -189,16 +210,20 @@ export default function ProjectPage() {
   const handleRetryMaterials = useCallback(async () => {
     if (!projectId) return;
     const result = await projectsApi.generate(projectId, { target_stage: "render_shot_images" });
-    const queuedRun = result as typeof result & { run_id?: number };
     setGenerating(true);
-    setCurrentRunId(queuedRun.run_id ?? result.id ?? null);
+    setCurrentRunId(result.run_id);
     setCurrentStage("shot_images");
     openChatPanel();
   }, [openChatPanel, projectId, setCurrentRunId, setCurrentStage, setGenerating]);
 
   // ---- Auto-start ----
   useEffect(() => {
-    if (searchParams.get("autoStart") === "true" && projectQuery.data && !autoStartTriggered.current && !isGenerating) {
+    if (
+      searchParams.get("autoStart") === "true" &&
+      projectQuery.data &&
+      !autoStartTriggered.current &&
+      !isGenerating
+    ) {
       autoStartTriggered.current = true;
       clearMessages();
       setCurrentStage("outline");
@@ -207,7 +232,16 @@ export default function ProjectPage() {
       searchParams.delete("autoStart");
       setSearchParams(searchParams, { replace: true });
     }
-  }, [searchParams, projectQuery.data, isGenerating, clearMessages, setCurrentStage, generateMutation, openChatPanel, setSearchParams]);
+  }, [
+    searchParams,
+    projectQuery.data,
+    isGenerating,
+    clearMessages,
+    setCurrentStage,
+    generateMutation,
+    openChatPanel,
+    setSearchParams,
+  ]);
 
   // ---- Invalidate React Query when generation completes ----
   const prevGeneratingRef = useRef(isGenerating);
@@ -221,12 +255,40 @@ export default function ProjectPage() {
   }, [isGenerating, projectId, queryClient]);
 
   // ---- Cleanup ----
-  useEffect(() => () => { clearProject(); clearCharacters(); clearShots(); clearMessages(); resetCritique(); }, [resetCritique]);
+  useEffect(
+    () => () => {
+      clearProject();
+      clearCharacters();
+      clearShots();
+      clearMessages();
+      resetCritique();
+    },
+    [resetCritique],
+  );
 
   // ---- Render states ----
-  if (!projectId) return <div className="min-h-screen flex items-center justify-center bg-paper text-ink-2">无效的项目 ID</div>;
-  if (projectQuery.isLoading) return <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-paper"><span className="loading loading-spinner loading-lg" /><p className="text-[12.5px] text-ink-3">正在读取项目</p></div>;
-  if (projectQuery.isError || !projectQuery.data) return <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-paper"><p className="font-serif text-[17px] text-ink-1">项目未找到</p><button onClick={() => navigate("/")} className="btn btn-primary">返回首页</button></div>;
+  if (!projectId)
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-paper text-ink-2">
+        无效的项目 ID
+      </div>
+    );
+  if (projectQuery.isLoading)
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-paper">
+        <span className="loading loading-spinner loading-lg" />
+        <p className="text-[12.5px] text-ink-3">正在读取项目</p>
+      </div>
+    );
+  if (projectQuery.isError || !projectQuery.data)
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-paper">
+        <p className="font-serif text-[17px] text-ink-1">项目未找到</p>
+        <button onClick={() => navigate("/")} className="btn btn-primary">
+          返回首页
+        </button>
+      </div>
+    );
 
   const hasRecovery = recoveryControl?.state === "recoverable";
   const latestRunError = runError || latestRunQuery.data?.error || null;
@@ -246,7 +308,15 @@ export default function ProjectPage() {
   return (
     <div className="h-screen flex flex-col bg-paper">
       <TopBar />
-      <StagePipeline currentStage={currentStage} isGenerating={isGenerating} awaitingConfirm={awaitingConfirm} hasRecovery={hasRecovery} onResume={() => {}} onCancel={handleCancel} stages={topStages} />
+      <StagePipeline
+        currentStage={currentStage}
+        isGenerating={isGenerating}
+        awaitingConfirm={awaitingConfirm}
+        hasRecovery={hasRecovery}
+        onResume={() => {}}
+        onCancel={handleCancel}
+        stages={topStages}
+      />
       <div className="flex flex-1 overflow-hidden">
         {/* Canvas — reads from store (real-time WS updates) */}
         <CanvasArea
@@ -265,7 +335,13 @@ export default function ProjectPage() {
           isSubmittingRevision={revisionMutation.isPending}
         />
         {/* Chat — auto-opens when generating */}
-        <ChatDrawer onSendFeedback={handleSendFeedback} onConfirm={handleConfirm} onGenerate={handleGenerate} onCancel={handleCancel} isGenerating={isGenerating} />
+        <ChatDrawer
+          onSendFeedback={handleSendFeedback}
+          onConfirm={handleConfirm}
+          onGenerate={handleGenerate}
+          onCancel={handleCancel}
+          isGenerating={isGenerating}
+        />
       </div>
     </div>
   );
@@ -320,29 +396,45 @@ function CanvasArea({
   const taskVideoCount = shots.filter((s) => isTaskVideoUrl(s.video_url)).length;
   const hasShotVideos = shots.length > 0 && playableVideoCount === shots.length;
   const hasMaterialFailure = !!latestRunError && latestRunError.length > 0;
-  const awaitingOutline = awaitingConfirm && (awaitingAgent === "outline");
+  const awaitingOutline = awaitingConfirm && awaitingAgent === "outline";
   const awaitingCharacters = awaitingConfirm && awaitingAgent === "characters";
   const awaitingShots = awaitingConfirm && awaitingAgent === "shots";
   const awaitingFrames = awaitingConfirm && awaitingAgent === "frames";
   const needsOutlineApproval = hasOutline && !outlineApproved;
-  const canContinuePlanning = hasOutline && outlineApproved && characters.length === 0 && !isGenerating;
+  const canContinuePlanning =
+    hasOutline && outlineApproved && characters.length === 0 && !isGenerating;
   const activeNodeId = nodeIdForStage(currentStage);
 
   const nodes: WorkflowNode[] = [
     {
       id: "outline",
       label: "故事大纲",
-      description: hasOutline ? getOutlineLogline(outlineRecord) || "已生成剧情结构" : "从剧本提炼叙事骨架",
+      description: hasOutline
+        ? getOutlineLogline(outlineRecord) || "已生成剧情结构"
+        : "从剧本提炼叙事骨架",
       icon: FileText,
-      status: hasOutline ? (awaitingOutline || needsOutlineApproval ? "review" : "done") : currentStage === "outline" && isGenerating ? "active" : "pending",
+      status: hasOutline
+        ? awaitingOutline || needsOutlineApproval
+          ? "review"
+          : "done"
+        : currentStage === "outline" && isGenerating
+          ? "active"
+          : "pending",
       metric: hasOutline ? `${getOutlineActs(outlineRecord).length || 1} 段` : "待生成",
     },
     {
       id: "characters",
       label: "角色设定",
-      description: characters.length > 0
-        ? characters.slice(0, 3).map((c) => c.name).join("、") + (hasCharacterImages ? "（含角色图）" : `（角色图 ${characterImageCount}/${characters.length}）`)
-        : "抽取人物并生成角色形象",
+      description:
+        characters.length > 0
+          ? characters
+              .slice(0, 3)
+              .map((c) => c.name)
+              .join("、") +
+            (hasCharacterImages
+              ? "（含角色图）"
+              : `（角色图 ${characterImageCount}/${characters.length}）`)
+          : "抽取人物并生成角色形象",
       icon: Users,
       status: awaitingCharacters
         ? "review"
@@ -350,24 +442,44 @@ function CanvasArea({
           ? "done"
           : hasPartialCharacters && !isGenerating
             ? "error"
-            : characters.length > 0 || currentStage === "characters" || currentStage === "characters_approval"
-              ? hasMaterialFailure && !isGenerating ? "error" : "active"
-              : hasOutline && outlineApproved && isGenerating ? "active" : "pending",
+            : characters.length > 0 ||
+                currentStage === "characters" ||
+                currentStage === "characters_approval"
+              ? hasMaterialFailure && !isGenerating
+                ? "error"
+                : "active"
+              : hasOutline && outlineApproved && isGenerating
+                ? "active"
+                : "pending",
       metric: characters.length ? `${characterImageCount}/${characters.length} 图` : "待生成",
       alert: consistency,
     },
     {
       id: "shots",
       label: "分镜脚本",
-      description: shots.length > 0 ? `${shots.length} 个镜头，动作、对白与提示词` : "拆解可生成镜头",
+      description:
+        shots.length > 0 ? `${shots.length} 个镜头，动作、对白与提示词` : "拆解可生成镜头",
       icon: Film,
-      status: shots.length > 0 ? (awaitingShots ? "review" : "done") : characters.length > 0 && isGenerating && (currentStage === "shots" || currentStage === "shots_approval") ? "active" : "pending",
+      status:
+        shots.length > 0
+          ? awaitingShots
+            ? "review"
+            : "done"
+          : characters.length > 0 &&
+              isGenerating &&
+              (currentStage === "shots" || currentStage === "shots_approval")
+            ? "active"
+            : "pending",
       metric: `${shots.length} 镜`,
     },
     {
       id: "shotImages",
       label: "镜头画面",
-      description: hasShotVideos ? "镜头视频片段已生成" : hasShotImages ? "分镜帧已生成，继续生成视频" : "由分镜生成镜头视频",
+      description: hasShotVideos
+        ? "镜头视频片段已生成"
+        : hasShotImages
+          ? "分镜帧已生成，继续生成视频"
+          : "由分镜生成镜头视频",
       icon: Image,
       status: awaitingFrames
         ? "review"
@@ -375,7 +487,9 @@ function CanvasArea({
           ? "done"
           : shots.length > 0 && (hasMaterialFailure || taskVideoCount > 0) && !isGenerating
             ? "error"
-            : currentStage === "shot_images" && isGenerating || playableVideoCount > 0 || shotImageCount > 0
+            : (currentStage === "shot_images" && isGenerating) ||
+                playableVideoCount > 0 ||
+                shotImageCount > 0
               ? "active"
               : "pending",
       metric: `${playableVideoCount}/${shots.length || 0} 视频`,
@@ -384,10 +498,29 @@ function CanvasArea({
     {
       id: "output",
       label: "合成输出",
-      description: isFinalVideoUrl(projectVideoUrl) ? "最终视频已输出" : projectVideoUrl ? "镜头连续播放预览已生成" : hasShotVideos ? "视频片段准备输出" : "合成最终漫剧视频",
+      description: isFinalVideoUrl(projectVideoUrl)
+        ? "最终视频已输出"
+        : projectVideoUrl
+          ? "镜头连续播放预览已生成"
+          : hasShotVideos
+            ? "视频片段准备输出"
+            : "合成最终漫剧视频",
       icon: Download,
-      status: projectVideoUrl && !isInternalCompositionUrl(projectVideoUrl) ? "done" : currentStage === "output" && isGenerating ? "active" : awaitingFrames ? "pending" : hasShotVideos ? "active" : "pending",
-      metric: isFinalVideoUrl(projectVideoUrl) ? "成片" : projectVideoUrl ? "预览" : `${playableVideoCount} 段`,
+      status:
+        projectVideoUrl && !isInternalCompositionUrl(projectVideoUrl)
+          ? "done"
+          : currentStage === "output" && isGenerating
+            ? "active"
+            : awaitingFrames
+              ? "pending"
+              : hasShotVideos
+                ? "active"
+                : "pending",
+      metric: isFinalVideoUrl(projectVideoUrl)
+        ? "成片"
+        : projectVideoUrl
+          ? "预览"
+          : `${playableVideoCount} 段`,
     },
   ];
 
@@ -405,8 +538,12 @@ function CanvasArea({
       <div className="h-full flex flex-col">
         <div className="min-h-14 shrink-0 border-b border-line bg-paper px-4 py-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[13.5px] font-medium truncate text-ink-1">{projectTitle || BRAND.fullName}</p>
-            <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">{BRAND.cnName} · 工作台</p>
+            <p className="text-[13.5px] font-medium truncate text-ink-1">
+              {projectTitle || BRAND.fullName}
+            </p>
+            <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">
+              {BRAND.cnName} · 工作台
+            </p>
           </div>
           <div className="flex items-center gap-2">
             {(awaitingConfirm || needsOutlineApproval) && (
@@ -444,7 +581,9 @@ function CanvasArea({
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 {nodes.map((node, index) => (
                   <WorkflowNodeCard
-                    ref={(element) => { nodeRefs.current[node.id] = element; }}
+                    ref={(element) => {
+                      nodeRefs.current[node.id] = element;
+                    }}
                     key={node.id}
                     node={node}
                     index={index}
@@ -483,17 +622,15 @@ function CanvasArea({
   );
 }
 
-const WorkflowNodeCard = forwardRef<HTMLButtonElement, {
-  node: WorkflowNode;
-  index: number;
-  selected: boolean;
-  onSelect: () => void;
-}>(function WorkflowNodeCard({
-  node,
-  index,
-  selected,
-  onSelect,
-}, ref) {
+const WorkflowNodeCard = forwardRef<
+  HTMLButtonElement,
+  {
+    node: WorkflowNode;
+    index: number;
+    selected: boolean;
+    onSelect: () => void;
+  }
+>(function WorkflowNodeCard({ node, index, selected, onSelect }, ref) {
   const Icon = node.icon;
 
   const iconTone =
@@ -545,4 +682,3 @@ const WorkflowNodeCard = forwardRef<HTMLButtonElement, {
     </button>
   );
 });
-

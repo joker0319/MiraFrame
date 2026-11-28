@@ -12,7 +12,6 @@ import { toMcpErrorText } from "../tools/mcp/adapter.js";
  */
 
 const root = findProjectRoot() ?? process.cwd();
-const serverScript = join(root, "packages/agent/src/tools/mcp/servers/assets-server.mjs");
 
 describe("createAssetsToolKit（官方 SDK 连接层）", () => {
   let kit: AssetsToolkit;

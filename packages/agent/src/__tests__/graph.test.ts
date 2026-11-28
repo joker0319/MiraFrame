@@ -1,9 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { MemorySaver, INTERRUPT, isInterrupted } from "@langchain/langgraph";
-import { buildPhase2Graph } from "../graph.js";
-import { routeAfterCritique, runWithNodeContext } from "../nodes/index.js";
+import { MemorySaver, Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
+import {
+  buildPhase2Graph,
+  CHARACTERS_APPROVAL_ROUTES,
+  CRITIQUE_ROUTES,
+  DIRECTOR_ROUTES,
+  OUTLINE_APPROVAL_ROUTES,
+  REVIEW_ROUTES,
+  SHOT_IMAGES_APPROVAL_ROUTES,
+  SHOTS_APPROVAL_ROUTES,
+} from "../graph.js";
+import {
+  routeAfterCharactersApproval,
+  routeAfterCritique,
+  routeAfterDirector,
+  routeAfterOutlineApproval,
+  routeAfterReview,
+  routeAfterShotImagesApproval,
+  routeAfterShotsApproval,
+  runWithNodeContext,
+} from "../nodes/index.js";
+import { VALID_TARGETS } from "../agents/review.js";
 import type { AgentContext } from "../agents/base.js";
-import { Phase2State } from "../state.js";
 
 /** 图执行时节点要从 ALS 取上下文，这里给一份最小可用的 fake context */
 function makeCtx(): AgentContext {
@@ -11,16 +29,30 @@ function makeCtx(): AgentContext {
     projectId: 1,
     runId: 1,
     threadId: "thread-1",
-    sendMessage: async () => { void 0; },
-    sendThinking: async () => { void 0; },
+    sendMessage: async () => {
+      void 0;
+    },
+    sendThinking: async () => {
+      void 0;
+    },
     callLlm: async () => "{}",
-    saveOutline: async () => { void 0; },
+    saveOutline: async () => {
+      void 0;
+    },
     createCharacter: async () => ({ id: 1 }),
     createShot: async () => ({ id: 1 }),
-    generateCharacterImage: async () => { void 0; },
-    generateShotFrames: async () => { void 0; },
-    generateShotVideos: async () => { void 0; },
-    composeProjectVideo: async () => { void 0; },
+    generateCharacterImage: async () => {
+      void 0;
+    },
+    generateShotFrames: async () => {
+      void 0;
+    },
+    generateShotVideos: async () => {
+      void 0;
+    },
+    composeProjectVideo: async () => {
+      void 0;
+    },
   };
 }
 
@@ -56,8 +88,7 @@ describe("Phase2 Graph", () => {
       planRationale: "",
       routeStage: null,
       routeMode: "full" as const,
-      reviewRequested: false,
-    };
+      };
 
     // Start execution - should hit interrupt at outline_approval.
     // 上下文只能通过 ALS 传入：没有 runWithNodeContext 包裹时节点会直接抛错，
@@ -67,7 +98,9 @@ describe("Phase2 Graph", () => {
     const result = await runWithNodeContext(makeCtx(), () => compiled.invoke(initialState, config));
 
     expect(isInterrupted(result)).toBe(true);
-    const interrupts = (result as unknown as Record<string, unknown>)[INTERRUPT] as Array<{ value: unknown }>;
+    const interrupts = (result as unknown as Record<string, unknown>)[INTERRUPT] as Array<{
+      value: unknown;
+    }>;
     const interruptValue = interrupts[0].value as { gate?: string };
     expect(interruptValue.gate).toBe("outline_approval");
   });
@@ -110,9 +143,117 @@ describe("Phase2 Graph", () => {
     expect(routeAfterCritique({ nextStage: "plan_shots" } as never)).toBe("plan_shots");
     // 通过 / 达到轮次上限：放行到人工审批
     expect(routeAfterCritique({ nextStage: "shots_approval" } as never)).toBe("shots_approval");
-    // 用户要求回退：优先走 review 分支
-    expect(routeAfterCritique({ nextStage: "shots_approval", reviewRequested: true } as never)).toBe(
-      "review",
+  });
+
+  it("所有路由函数的返回值都能在条件边登记表里找到", () => {
+    // 这类不一致以前只在运行时暴露：路由函数返回了合法目标，但 graph.ts 没登记，
+    // 于是流程跑到一半抛 "Branch condition returned unknown destination"。
+    const cases: Array<[Record<string, string>, string, string]> = [
+      [
+        DIRECTOR_ROUTES,
+        routeAfterDirector({ executionPlan: [], currentStage: "plan_outline" } as never),
+        "director",
+      ],
+      [
+        DIRECTOR_ROUTES,
+        routeAfterDirector({
+          executionPlan: ["plan_shots"],
+          currentStage: "plan_outline",
+        } as never),
+        "director",
+      ],
+      [CRITIQUE_ROUTES, routeAfterCritique({ nextStage: "plan_shots" } as never), "critique_shots"],
+      [
+        CRITIQUE_ROUTES,
+        routeAfterCritique({ nextStage: "shots_approval" } as never),
+        "critique_shots",
+      ],
+      [
+        OUTLINE_APPROVAL_ROUTES,
+        routeAfterOutlineApproval({ approvalHistory: { outline: "approved" } } as never),
+        "outline_approval",
+      ],
+      [
+        OUTLINE_APPROVAL_ROUTES,
+        routeAfterOutlineApproval({ approvalHistory: { outline: "rejected" } } as never),
+        "outline_approval",
+      ],
+      [
+        CHARACTERS_APPROVAL_ROUTES,
+        routeAfterCharactersApproval({ approvalHistory: { characters: "approved" } } as never),
+        "characters_approval",
+      ],
+      [
+        CHARACTERS_APPROVAL_ROUTES,
+        routeAfterCharactersApproval({ approvalHistory: { characters: "rejected" } } as never),
+        "characters_approval",
+      ],
+      [
+        SHOTS_APPROVAL_ROUTES,
+        routeAfterShotsApproval({ approvalHistory: { shots: "approved" } } as never),
+        "shots_approval",
+      ],
+      [
+        SHOTS_APPROVAL_ROUTES,
+        routeAfterShotsApproval({ approvalHistory: { shots: "rejected" } } as never),
+        "shots_approval",
+      ],
+      [
+        SHOT_IMAGES_APPROVAL_ROUTES,
+        routeAfterShotImagesApproval({ approvalHistory: { frames: "approved" } } as never),
+        "shot_images_approval",
+      ],
+      [
+        SHOT_IMAGES_APPROVAL_ROUTES,
+        routeAfterShotImagesApproval({ approvalHistory: { frames: "rejected" } } as never),
+        "shot_images_approval",
+      ],
+      [REVIEW_ROUTES, routeAfterReview({ routeStage: null } as never), "review"],
+    ];
+    for (const [destinations, target, source] of cases) {
+      expect(destinations, `${source} → ${target} 缺少登记`).toHaveProperty(target);
+    }
+  });
+
+  it("review 的合法目标和条件边登记表完全一致", () => {
+    expect(new Set(Object.keys(REVIEW_ROUTES))).toEqual(VALID_TARGETS);
+    // 逐项断言，失败时能直接看出是哪个目标漏了
+    for (const target of VALID_TARGETS) {
+      expect(REVIEW_ROUTES).toHaveProperty(target);
+    }
+  });
+
+  it("角色门拒绝后回到 plan_characters 并再次中断，而不是抛 unknown destination", async () => {
+    const compiled = buildPhase2Graph().compile({ checkpointer: new MemorySaver() });
+    const config = { configurable: { thread_id: "reject-characters" } };
+    const initialState = {
+      projectId: "1",
+      runId: "1",
+      threadId: "reject-characters",
+      currentStage: "plan_characters" as const,
+      nextStage: null,
+      stageHistory: [],
+      approvalHistory: {},
+      critiqueScores: {},
+      critiqueRound: 0,
+      artifactText: "",
+      artifactLineage: {},
+      executionPlan: [],
+      planRationale: "",
+      routeStage: null,
+      routeMode: "full" as const,
+      };
+
+    const first = await runWithNodeContext(makeCtx(), () => compiled.invoke(initialState, config));
+    expect(isInterrupted(first)).toBe(true);
+
+    const second = await runWithNodeContext(makeCtx(), () =>
+      compiled.invoke(new Command({ resume: { confirm: false } }), config),
     );
+    expect(isInterrupted(second)).toBe(true);
+    const interrupts = (second as unknown as Record<string, unknown>)[INTERRUPT] as Array<{
+      value: unknown;
+    }>;
+    expect((interrupts[0].value as { gate?: string }).gate).toBe("characters_approval");
   });
 });

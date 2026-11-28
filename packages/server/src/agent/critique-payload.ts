@@ -1,4 +1,5 @@
 import type { CritiqueReport } from "@miraframe/agent";
+import type { CritiqueResultEventData } from "@miraframe/shared";
 
 /**
  * Agent 侧的 camelCase 评审结论 → WS 的 snake_case 载荷。
@@ -7,7 +8,7 @@ import type { CritiqueReport } from "@miraframe/agent";
  * 1. 前端契约只在一处定义，测试可以直接断言字段名；
  * 2. 测试不必拉起 @nestjs/bullmq / ioredis 那一整套依赖。
  */
-export function toCritiqueResultPayload(report: CritiqueReport) {
+export function toCritiqueResultPayload(report: CritiqueReport): CritiqueResultEventData {
   return {
     stage: report.stage,
     entity_type: report.entityType,

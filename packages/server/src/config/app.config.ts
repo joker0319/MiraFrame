@@ -16,6 +16,10 @@ export const appConfig = registerAs("app", () => ({
   port: parseInt(process.env.PORT || "3000", 10),
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
   adminToken: process.env.ADMIN_TOKEN || null,
+  // 可选共享口令；配置后所有 HTTP + WS 都需要携带
+  apiToken: process.env.API_TOKEN || null,
+  // 0 = 关闭；单实例固定窗口限流
+  rateLimitPerMinute: parseInt(process.env.RATE_LIMIT_PER_MINUTE || "0", 10),
   publicBaseUrl: process.env.PUBLIC_BASE_URL || null,
   requestTimeoutS: parseFloat(process.env.REQUEST_TIMEOUT_S || "120"),
 

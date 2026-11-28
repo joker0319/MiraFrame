@@ -1,291 +1,296 @@
-import { z } from "zod";
-import { StoryOutlineSchema, CharacterSchema, ShotSchema } from "./project";
-import { RecoverySummarySchema } from "./agent";
-
-// ── WsEventType ──
-export const WsEventType = z.enum([
-  "connected",
-  "pong",
-  "echo",
-  "error",
-  "run_started",
-  "run_progress",
-  "run_message",
-  "agent_thinking",
-  "run_completed",
-  "run_failed",
-  "run_awaiting_confirm",
-  "run_confirmed",
-  "run_cancelled",
-  "character_created",
-  "character_updated",
-  "character_deleted",
-  "shot_created",
-  "shot_updated",
-  "shot_deleted",
-  "outline_updated",
-  "project_updated",
-  "data_cleared",
-  "critique_result",
-  "bible_updated",
-  "version_created",
-  "version_rollback",
-  "audio_generated",
-  "export_completed",
-  "consistency_eval_completed",
-  "consistency_repair_completed",
-]);
-export type WsEventType = z.infer<typeof WsEventType>;
-
-// ── Event Data Schemas ──
-export const RunProgressEventDataSchema = z.object({
-  runId: z.string().uuid(),
-  projectId: z.string().uuid().optional(),
-  currentAgent: z.string().nullable().optional(),
-  currentStage: z.string().nullable().optional(),
-  stage: z.string().nullable().optional(),
-  nextStage: z.string().nullable().optional(),
-  progress: z.number().min(0).max(1),
-  recoverySummary: RecoverySummarySchema.nullable().optional(),
-});
-export type RunProgressEventData = z.infer<typeof RunProgressEventDataSchema>;
-
-export const RunStartedEventDataSchema = z.object({
-  runId: z.string().uuid(),
-  projectId: z.string().uuid().optional(),
-  providerSnapshot: z.record(z.unknown()).nullable().optional(),
-  currentStage: z.string().nullable().optional(),
-  stage: z.string().nullable().optional(),
-  nextStage: z.string().nullable().optional(),
-  progress: z.number().min(0).max(1).optional(),
-  currentAgent: z.string().nullable().optional(),
-  recoverySummary: RecoverySummarySchema.nullable().optional(),
-  preservedStages: z.array(z.string()).optional(),
-});
-export type RunStartedEventData = z.infer<typeof RunStartedEventDataSchema>;
-
-export const RunMessageEventDataSchema = z.object({
-  agent: z.string().nullable().optional(),
-  role: z.string().nullable().optional(),
-  content: z.string(),
-  summary: z.string().nullable().optional(),
-  progress: z.number().min(0).max(1).nullable().optional(),
-  isLoading: z.boolean().nullable().optional(),
-});
-export type RunMessageEventData = z.infer<typeof RunMessageEventDataSchema>;
-
-export const RunCompletedEventDataSchema = z.object({
-  runId: z.string().uuid().nullable().optional(),
-  projectId: z.string().uuid().nullable().optional(),
-  currentStage: z.string().nullable().optional(),
-  currentAgent: z.string().nullable().optional(),
-  message: z.string().nullable().optional(),
-  videoGenerationPending: z.boolean().nullable().optional(),
-});
-export type RunCompletedEventData = z.infer<typeof RunCompletedEventDataSchema>;
-
-export const RunFailedEventDataSchema = z.object({
-  runId: z.string().uuid().nullable().optional(),
-  projectId: z.string().uuid().nullable().optional(),
-  error: z.string().nullable().optional(),
-  agent: z.string().nullable().optional(),
-  currentStage: z.string().nullable().optional(),
-});
-export type RunFailedEventData = z.infer<typeof RunFailedEventDataSchema>;
-
-export const RunCancelledEventDataSchema = z.object({
-  runId: z.string().uuid().nullable().optional(),
-  projectId: z.string().uuid().nullable().optional(),
-  runIds: z.array(z.string().uuid()).nullable().optional(),
-  cancelledCount: z.number().nullable().optional(),
-});
-export type RunCancelledEventData = z.infer<typeof RunCancelledEventDataSchema>;
-
-export const RunAwaitingConfirmEventDataSchema = z.object({
-  runId: z.string().uuid(),
-  projectId: z.string().uuid().optional(),
-  agent: z.string(),
-  gate: z.string().nullable().optional(),
-  currentStage: z.string().nullable().optional(),
-  stage: z.string().nullable().optional(),
-  nextStage: z.string().nullable().optional(),
-  recoverySummary: RecoverySummarySchema,
-  preservedStages: z.array(z.string()).optional(),
-  message: z.string().nullable().optional(),
-  completed: z.string().nullable().optional(),
-  nextStep: z.string().nullable().optional(),
-  question: z.string().nullable().optional(),
-  autoMode: z.boolean().nullable().optional(),
-  storyOutline: StoryOutlineSchema.nullable().optional(),
-  visualBible: z.string().nullable().optional(),
-});
-export type RunAwaitingConfirmEventData = z.infer<typeof RunAwaitingConfirmEventDataSchema>;
-
-export const RunConfirmedEventDataSchema = z.object({
-  runId: z.string().uuid(),
-  projectId: z.string().uuid().optional(),
-  agent: z.string(),
-  gate: z.string().nullable().optional(),
-  currentStage: z.string().nullable().optional(),
-  stage: z.string().nullable().optional(),
-  nextStage: z.string().nullable().optional(),
-  recoverySummary: RecoverySummarySchema.nullable().optional(),
-  autoMode: z.boolean().nullable().optional(),
-});
-export type RunConfirmedEventData = z.infer<typeof RunConfirmedEventDataSchema>;
-
-export const AgentThinkingEventDataSchema = z.object({
-  agent: z.string(),
-  phase: z.enum(["reasoning", "decision", "planning", "reviewing"]),
-  content: z.string(),
-  details: z.string().nullable().optional(),
-});
-export type AgentThinkingEventData = z.infer<typeof AgentThinkingEventDataSchema>;
+import { WS_EVENT_TYPES } from "../constants/events";
+import type { AgentThinkingPhase, VersionEntityType } from "./common";
+import type {
+  BlockingClip,
+  Character,
+  ProjectProviderSettings,
+  Shot,
+  StoryOutline,
+} from "./project";
+import type { RecoverySummaryRead } from "./agent";
+import type { ShotConsistencyResult } from "./consistency";
 
 /**
- * Critic 每轮评审的结果。
- * 载荷用 snake_case，与后端其它 WS 事件（shot_updated / run_progress）保持一致；
- * threshold / round / max_rounds 让前端能解释「为什么没过、还有几次机会」，
- * 不必再自己猜环境变量里的阈值。
+ * 事件名以 `WS_EVENT_TYPES` 常量为唯一来源；这里只做类型推导。
+ * 新增事件时先加常量，再补 `WsEventDataMap`——两处不一致会被测试卡住。
  */
-export const CritiqueResultEventDataSchema = z.object({
-  stage: z.string(),
-  entity_type: z.string(),
-  entity_id: z.number().int().nullable().optional(),
-  score: z.number().min(0).max(10),
-  threshold: z.number(),
-  passed: z.boolean(),
-  round: z.number().int().min(1),
-  max_rounds: z.number().int().min(1),
-  dimensions: z.record(z.number()),
-  issues: z.array(z.string()),
-  suggestions: z.array(z.string()),
-  will_regenerate: z.boolean(),
-});
-export type CritiqueResultEventData = z.infer<typeof CritiqueResultEventDataSchema>;
+export type WsEventType = (typeof WS_EVENT_TYPES)[number];
 
-export const VersionCreatedEventDataSchema = z.object({
-  entityType: z.enum(["character", "shot"]),
-  entityId: z.string().uuid(),
-  version: z.number(),
-  trigger: z.string(),
-});
-export type VersionCreatedEventData = z.infer<typeof VersionCreatedEventDataSchema>;
+export interface ConnectedEventData {
+  project_id: number;
+}
 
-export const VersionRollbackEventDataSchema = z.object({
-  entityType: z.enum(["character", "shot"]),
-  entityId: z.string().uuid(),
-  fromVersion: z.number(),
-  toVersion: z.number(),
-});
-export type VersionRollbackEventData = z.infer<typeof VersionRollbackEventDataSchema>;
+export interface ErrorEventData {
+  message?: string;
+  error?: string;
+}
 
-export const AudioGeneratedEventDataSchema = z.object({
-  shotId: z.string().uuid(),
-  ttsUrl: z.string().nullable().optional(),
-  bgmType: z.string().nullable().optional(),
-  duration: z.number().nullable().optional(),
-});
-export type AudioGeneratedEventData = z.infer<typeof AudioGeneratedEventDataSchema>;
+export interface RunStartedEventData {
+  run_id: number;
+  project_id?: number;
+  provider_snapshot?: ProjectProviderSettings;
+  current_stage?: string;
+  stage?: string;
+  next_stage?: string;
+  progress?: number;
+  current_agent?: string;
+  recovery_summary?: RecoverySummaryRead;
+  preserved_stages?: string[];
+}
 
-export const ExportCompletedEventDataSchema = z.object({
-  exportId: z.string(),
-  format: z.string(),
-  downloadUrl: z.string().nullable().optional(),
-  status: z.enum(["completed", "failed"]),
-  error: z.string().nullable().optional(),
-});
-export type ExportCompletedEventData = z.infer<typeof ExportCompletedEventDataSchema>;
+export interface RunProgressEventData {
+  run_id: number;
+  project_id?: number;
+  current_agent?: string;
+  current_stage?: string;
+  stage?: string;
+  next_stage?: string;
+  progress?: number;
+  recovery_summary?: RecoverySummaryRead;
+}
 
-export const ConsistencyEvalCompletedEventDataSchema = z.object({
-  projectId: z.string().uuid(),
-  overallScore: z.number().min(0).max(100),
-  characterCount: z.number(),
-});
-export type ConsistencyEvalCompletedEventData = z.infer<
-  typeof ConsistencyEvalCompletedEventDataSchema
->;
+export interface RunMessageEventData {
+  agent?: string | null;
+  role?: string | null;
+  content: string;
+  summary?: string | null;
+  progress?: number | null;
+  is_loading?: boolean | null;
+}
+
+export interface AgentThinkingEventData {
+  agent: string;
+  phase: AgentThinkingPhase;
+  content: string;
+  details?: string;
+}
+
+export interface RunCompletedEventData {
+  run_id?: number;
+  project_id?: number;
+  current_stage?: string;
+  current_agent?: string;
+  message?: string;
+  video_generation_pending?: boolean;
+}
+
+export interface RunFailedEventData {
+  run_id?: number;
+  project_id?: number;
+  error?: string;
+  agent?: string;
+  current_stage?: string;
+}
+
+export interface RunAwaitingConfirmEventData {
+  run_id: number;
+  project_id?: number;
+  agent: string;
+  gate?: string;
+  current_stage?: string;
+  stage?: string;
+  next_stage?: string;
+  recovery_summary?: RecoverySummaryRead;
+  preserved_stages?: string[];
+  message?: string;
+  completed?: boolean;
+  next_step?: string;
+  question?: string;
+  auto_mode?: boolean;
+  story_outline?: StoryOutline;
+  visual_bible?: string | null;
+}
+
+export interface RunConfirmedEventData {
+  run_id: number;
+  project_id?: number;
+  agent?: string;
+  gate?: string;
+  current_stage?: string;
+  stage?: string;
+  next_stage?: string;
+  recovery_summary?: RecoverySummaryRead;
+  auto_mode?: boolean;
+}
+
+export interface RunCancelledEventData {
+  run_id?: number;
+  project_id?: number;
+  run_ids?: number[];
+  cancelled_count?: number;
+}
+
+export interface CharacterCreatedEventData {
+  character: Character;
+}
+
+export interface CharacterUpdatedEventData {
+  character: Character;
+}
+
+export interface CharacterDeletedEventData {
+  character_id: number;
+}
+
+export interface ShotCreatedEventData {
+  shot: Shot;
+}
+
+export interface ShotUpdatedEventData {
+  shot: Shot;
+}
+
+export interface ShotDeletedEventData {
+  shot_id: number;
+}
+
+export interface OutlineUpdatedEventData {
+  project_id: number;
+  story_outline?: StoryOutline | null;
+  visual_bible?: string | null;
+  outline_approved?: boolean;
+}
+
+export interface ProjectUpdatedEventData {
+  title?: string;
+  story?: string;
+  style?: string;
+  summary?: string;
+  story_outline?: StoryOutline | null;
+  visual_bible?: string | null;
+  outline_approved?: boolean;
+  video_url?: string | null;
+  status?: string | null;
+  target_shot_count?: number;
+  character_hints?: string[] | null;
+  creation_mode?: string | null;
+  reference_images?: string[] | null;
+  exports?: string[] | null;
+  provider_settings?: ProjectProviderSettings | null;
+  universe_id?: number | null;
+  chapter_number?: number | null;
+  chapter_title?: string | null;
+  blocking_clips?: BlockingClip[] | null;
+}
+
+export interface DataClearedEventData {
+  cleared_types?: string[];
+}
+
+export interface CritiqueResultEventData {
+  stage: string;
+  entity_type: string;
+  entity_id?: number | null;
+  score: number;
+  threshold: number;
+  passed: boolean;
+  round: number;
+  max_rounds: number;
+  dimensions: Record<string, number>;
+  issues: string[];
+  suggestions: string[];
+  will_regenerate: boolean;
+}
+
+export interface BibleUpdatedEventData {
+  character_id: number;
+  visual_notes?: string;
+  reference_images_count?: number;
+  has_embedding?: boolean;
+}
+
+export interface VersionCreatedEventData {
+  entity_type: VersionEntityType;
+  entity_id: number;
+  version: number;
+  trigger: string;
+}
+
+export interface VersionRollbackEventData {
+  entity_type: VersionEntityType;
+  entity_id: number;
+  from_version: number;
+  to_version: number;
+}
+
+export interface AudioGeneratedEventData {
+  shot_id: number;
+  tts_url?: string;
+  bgm_type?: string;
+  duration?: number;
+}
+
+export interface ExportCompletedEventData {
+  export_id: string;
+  format: string;
+  download_url?: string;
+  status: string;
+  error?: string;
+}
+
+export interface ConsistencyEvalCompletedEventData {
+  project_id: number;
+  source?: "auto" | "manual";
+  checked_at?: string;
+  summary?: { ok: number; review: number; drift: number; unverifiable: number };
+  shots?: Array<{ shot_id: number; consistency_result: ShotConsistencyResult }>;
+}
+
+export interface ConsistencyRepairCompletedEventData {
+  project_id: number;
+  source?: "auto" | "manual";
+  repaired: Array<{
+    shot_id: number;
+    order: number | null;
+    references: number;
+    verdict?: string | null;
+    resolved: boolean;
+  }>;
+  skipped: Array<{ shot_id: number; reason: string }>;
+  failed: Array<{ shot_id: number; error: string }>;
+}
 
 /**
- * 自动修复回执。线上一律 snake_case —— 与 consistency_eval_completed 的实际载荷保持一致，
- * 不要写成 camelCase，否则前端拿到的是 undefined。
+ * 每个事件的数据形状。用 `Record<WsEventType, ...>` 的形式约束，
+ * 漏一个事件会在测试里的类型断言处直接报错。
  */
-export const ConsistencyRepairCompletedEventDataSchema = z.object({
-  project_id: z.number().int(),
-  source: z.literal("auto"),
-  repaired: z.array(
-    z.object({
-      shot_id: z.number().int(),
-      order: z.number().int().nullable(),
-      references: z.number().int(),
-      /** 复检结论；复检失败时为 null */
-      verdict: z.string().nullable(),
-      /** 复检不再是漂移；unverifiable 不算修好 */
-      resolved: z.boolean(),
-    }),
-  ),
-  skipped: z.array(
-    z.object({
-      shot_id: z.number().int(),
-      reason: z.enum(["not_drift", "no_references", "over_budget"]),
-    }),
-  ),
-  failed: z.array(z.object({ shot_id: z.number().int(), error: z.string() })),
-});
-export type ConsistencyRepairCompletedEventData = z.infer<
-  typeof ConsistencyRepairCompletedEventDataSchema
->;
+export interface WsEventDataMap {
+  connected: ConnectedEventData;
+  pong: Record<string, unknown>;
+  echo: Record<string, unknown>;
+  error: ErrorEventData;
+  run_started: RunStartedEventData;
+  run_progress: RunProgressEventData;
+  run_message: RunMessageEventData;
+  agent_thinking: AgentThinkingEventData;
+  run_completed: RunCompletedEventData;
+  run_failed: RunFailedEventData;
+  run_awaiting_confirm: RunAwaitingConfirmEventData;
+  run_confirmed: RunConfirmedEventData;
+  run_cancelled: RunCancelledEventData;
+  character_created: CharacterCreatedEventData;
+  character_updated: CharacterUpdatedEventData;
+  character_deleted: CharacterDeletedEventData;
+  shot_created: ShotCreatedEventData;
+  shot_updated: ShotUpdatedEventData;
+  shot_deleted: ShotDeletedEventData;
+  outline_updated: OutlineUpdatedEventData;
+  project_updated: ProjectUpdatedEventData;
+  data_cleared: DataClearedEventData;
+  critique_result: CritiqueResultEventData;
+  bible_updated: BibleUpdatedEventData;
+  version_created: VersionCreatedEventData;
+  version_rollback: VersionRollbackEventData;
+  audio_generated: AudioGeneratedEventData;
+  export_completed: ExportCompletedEventData;
+  consistency_eval_completed: ConsistencyEvalCompletedEventData;
+  consistency_repair_completed: ConsistencyRepairCompletedEventData;
+}
 
-export const OutlineUpdatedEventDataSchema = z.object({
-  projectId: z.string().uuid(),
-  storyOutline: StoryOutlineSchema.nullable().optional(),
-  visualBible: z.string().nullable().optional(),
-  outlineApproved: z.boolean(),
-});
-export type OutlineUpdatedEventData = z.infer<typeof OutlineUpdatedEventDataSchema>;
+/** 强类型的 WS 信封，前端/服务端都可以用它构造事件。 */
+export type WsEvent = {
+  [K in WsEventType]: { type: K; data: WsEventDataMap[K] };
+}[WsEventType];
 
-export const BibleUpdatedEventDataSchema = z.object({
-  characterId: z.string().uuid(),
-  visualNotes: z.boolean(),
-  referenceImagesCount: z.number(),
-  hasEmbedding: z.boolean(),
-});
-export type BibleUpdatedEventData = z.infer<typeof BibleUpdatedEventDataSchema>;
-
-// ── Character/Shot event wrappers ──
-export const CharacterCreatedEventDataSchema = z.object({
-  character: CharacterSchema,
-});
-export type CharacterCreatedEventData = z.infer<typeof CharacterCreatedEventDataSchema>;
-
-export const CharacterUpdatedEventDataSchema = z.object({
-  character: CharacterSchema,
-});
-export type CharacterUpdatedEventData = z.infer<typeof CharacterUpdatedEventDataSchema>;
-
-export const CharacterDeletedEventDataSchema = z.object({
-  characterId: z.string().uuid(),
-});
-export type CharacterDeletedEventData = z.infer<typeof CharacterDeletedEventDataSchema>;
-
-export const ShotCreatedEventDataSchema = z.object({
-  shot: ShotSchema,
-});
-export type ShotCreatedEventData = z.infer<typeof ShotCreatedEventDataSchema>;
-
-export const ShotUpdatedEventDataSchema = z.object({
-  shot: ShotSchema,
-});
-export type ShotUpdatedEventData = z.infer<typeof ShotUpdatedEventDataSchema>;
-
-export const ShotDeletedEventDataSchema = z.object({
-  shotId: z.string().uuid(),
-});
-export type ShotDeletedEventData = z.infer<typeof ShotDeletedEventDataSchema>;
-
-// ── WsEvent wrapper ──
-export const WsEventSchema = z.object({
-  type: WsEventType,
-  data: z.record(z.unknown()),
-});
-export type WsEvent = z.infer<typeof WsEventSchema>;
+/** 编译期检查：`WS_EVENT_TYPES` 里的每个事件都必须在 map 里有形状。 */
+export type MissingWsEventData = Exclude<WsEventType, keyof WsEventDataMap>;

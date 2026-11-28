@@ -2,7 +2,17 @@
 
 > 目的：把「一次生成从点击到出片」的每个环节、每个文件、每个字段讲清楚。
 > 所有结论都是读代码 + 实际运行验证过的，不是按目录猜的。
-> 规模参考：shared 1426 行 / agent 1188 行 / server 3781 行 / frontend 7889 行。
+>
+> **版本说明（2026-11-28）**：本文主体是项目早期快照，当前实现已经向前走了几步。规模参考以 README 为准（约 2.1 万行生产代码、414 个测试）。阅读时请以下面的差异清单为准：
+>
+> - checkpoint：`MemorySaver` → `PostgresSaver`（跨进程/重启可恢复）
+> - 图：新增 `director`（Supervisor）与 `critique_shots`（LLM 自动质检），共 14 个节点
+> - 记忆：新增滚动摘要 + 最近 120 条消息窗口（不再只拼最近 5 轮原文）
+> - 表：7 张（新增 `conversation_memory`，移除未使用的 `agentmessage`）
+> - 已修复的“断点”：本文 §6 表中的 1/2/5/6/7/8/9/10/11/14
+> - 仍存在：3（门节点不写 `currentStage`）、12（threadId 每 run 不同）
+> - 契约：shared 已是单一来源（整数 ID、snake_case、ISO 时间），前端 `types` 只做 re-export，服务端用 DTO 输出，并用 Zod 在 REST 入参/WS 出站做运行时校验
+> - 部署：ffmpeg/ffprobe、启动迁移、nginx `/static/`、`env_file`、可选 API_TOKEN 与限流已补；仍缺用户级鉴权，整体仍是本地原型
 
 ---
 
@@ -26,11 +36,11 @@ frontend  ──HTTP/WS──▶  server  ──import──▶  agent
     │                      │                   │
     └──────────┬───────────┴───────────────────┘
                ▼
-            shared（类型 / 阶段名 / WS 事件 / Zod schema）
+            shared（接口契约 / 阶段名 / WS 事件 / 字幕规则）
 ```
 
 - `shared` 被三层共用，但**只放类型和常量，没有运行逻辑**。
-- `agent` 是纯逻辑包：没有任何 NestJS、没有任何 DB 客户端、不 `fetch`。它的包依赖只有 `@langchain/langgraph` + `zod`。
+- `agent` 是纯逻辑包：没有任何 NestJS、没有任何 DB 客户端、不 `fetch`。它的包依赖只有 `@langchain/langgraph`、`@langchain/mcp-adapters` 和 `@miraframe/shared`。
 - `server` 是唯一知道「数据库怎么连、模型怎么调、消息怎么推」的地方。
 - `frontend` 只通过 `services/*.ts`（REST）和 `hooks/useWebSocket.ts`（Socket.IO）与后端打交道。
 
@@ -104,7 +114,7 @@ frontend  ──HTTP/WS──▶  server  ──import──▶  agent
    → `TextService` 按 `TEXT_PROVIDER` 决定走真实 HTTP 还是 `generateFakeResponse(intent)`
 4. 解析 JSON（`extractJson` 先去掉 JSON 代码围栏，再正则抓第一个 `{...}`），失败就 `{raw: text}` 兜底
 5. `ctx.saveOutline()` → 写 `project.story_outline / visual_bible` + 推 `outline_updated`
-6. 返回 `{currentStage:"plan_outline", nextStage:"outline_approval", stageHistory:["plan_outline"], reviewRequested:false}`
+6. 返回 `{currentStage:"plan_outline", nextStage:"outline_approval", stageHistory:["plan_outline"]}`
 
 **节点的返回值就是 state 的补丁**（LangGraph 的 reducer 语义：默认覆盖，`stageHistory` 是 concat）。
 
@@ -162,7 +172,7 @@ Processor 拿到后（`:511-542`）：
 
 ## 3. Agent 层详解（1188 行，真正的改造区）
 
-### 3.1 `state.ts` — 18 个字段
+### 3.1 `state.ts` — 20 个字段
 
 | 组 | 字段 | 谁写 | 谁读 |
 | --- | --- | --- | --- |
@@ -172,9 +182,9 @@ Processor 拿到后（`:511-542`）：
 | | `stageHistory` | 各 Agent（`concat`） | 无人读 |
 | | `routeStage / routeMode` | `review.ts` | `routeAfterReview` / 无人读 |
 | 审批 | `approvalHistory` | 4 个门节点 | 4 个 `routeAfterX` |
-| | `reviewRequested` | 各 Agent 恒 `false` | 4 个 `routeAfterX`（**永远为假**） |
 | 质量 | `critiqueScores / critiqueRound` | 只有 `critic.ts` | 无人 |
-| | `artifactLineage` | **无人写** | 无人读 |
+| | `artifactLineage` | `PlanAgent` 从 DB 读回 | 前端/后续增量复用 |
+| 编排 | `executionPlan / planRationale` | `director.ts` | `routeAfterDirector` / 前端 |
 | 反馈 | `feedback / feedbackType / entityType / entityId / revisionMode` | processor 初始化 | `outline.ts` / `plan.ts` |
 
 **只有 `stageHistory` 有 reducer**（`:10-13`），其余 17 个都是「覆盖」语义。
@@ -283,10 +293,9 @@ AppModule
 | `project` | 项目主表，也是「事实上的记忆」 | `story_outline` `visual_bible` `outline_approved` `video_url` `status` |
 | `character` | 角色 | `image_url` `reference_images` + 一整套 `approved_*` 快照字段 |
 | `shot` | 镜头 | `image_prompt` `prompt` `image_url` `video_url` `duration` + `approved_*` 快照 |
-| `shot_character_binding` | 镜头↔角色 多对多 | 目前**没被任何代码写入** |
+| `shot_character_binding` | 镜头↔角色 多对多 | 历史绑定兜底；主路径已用 `shot.character_ids` |
 | `agentrun` | 一次执行 | `status` `awaiting_gate` `progress` `thread_id` `patch_plan` |
 | `message` | 聊天记录（含进度消息） | `agent` `role` `summary` `progress` `is_loading` |
-| `agentmessage` | **未被使用的表** | 只有 schema 和 relations，没有任何读写 |
 
 `awaiting_gate` 是整个 HITL 里最关键的一列：**它是唯一能跨进程存活的「我卡在哪个门」记录**。
 
@@ -374,7 +383,7 @@ else
 | 1 | `nodes/index.ts:35` | 没上下文时返回 mock（`callLlm` 返回 `"{}"`） | 失败静默：图跑完、消息正常、产物为空；现有 `graph.test.ts` 就靠它活着 |
 | 2 | `graph.ts:50-57` | `characters_approval` / `shots_approval` 的拒绝目的地没登记 | **在角色门或分镜门点「拒绝」→ 抛 `Branch condition returned unknown destination`**，流程崩（已用探针实测） |
 | 3 | `nodes/index.ts:122-172` | 四个门都不写 `currentStage` | `review.ts` 的 routeMap 以门名为 key，永远匹配不上，永远落到 `plan_outline` |
-| 4 | 全仓库 | 没有任何地方把 `reviewRequested` 置 true | `review` 节点实际不可达；四个 `routeAfterX` 的第一行判断是死逻辑 |
+| 4 | 全仓库 | ~~`reviewRequested` 恒 false~~ | **已移除**；`review` 节点仍可经 `currentStage=review` 进入 |
 | 5 | `graph.ts:65-69` | review 的目的地表只有 3 个，`review.ts` 会产出 5 种 | 即使接通也会抛错 |
 | 6 | `agents/index.ts` | `CriticAgent` / `RenderAgent` 只被导出，没有进图 | 「质量评审」「角色图渲染」两个阶段是空壳；`critiqueScores` 运行时永远 `{}` |
 | 7 | `ws.gateway.ts` | 只有 `join` 处理器 | 前端 yolo 模式的 `socket.emit("confirm")` 是死代码 |
@@ -383,7 +392,7 @@ else
 | 10 | `frontend/services` | `versionsApi / consistencyApi / exportApi / styleTemplatesApi / universesApi` 调用的接口后端不存在 | 这些功能是前端壳子，点了会 404 |
 | 11 | `hooks/useWebSocket.ts:24` | WS 地址硬编码 `http://host:3000` | 非 3000 端口/HTTPS 部署会连不上 |
 | 12 | `agent.service.ts:109` | `threadId` 每次新 run 都不同 | 跨 run 无法续跑同一个 thread；「继续上次」只能靠重跑阶段 |
-| 13 | `db/schema.ts` | `agentmessage` 表、`shot_character_binding` 表无读写 | 预留结构，别当成已有能力 |
+| 13 | `db/schema.ts` | ~~`agentmessage` 表无读写~~ | **已删除**（迁移 0004），现为 7 张表 |
 | 14 | `state.ts` | `artifactLineage` 从没被写过 | 增量重生成没有数据基础（P3 要补的第一块） |
 
 ---
